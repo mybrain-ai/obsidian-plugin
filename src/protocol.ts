@@ -24,27 +24,27 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
         new Notice("MyBrain: deep-link missing token");
         return;
       }
-      
+
       const trimmedToken = token.trim();
-      
+
       if (!TOKEN_RE.test(trimmedToken)) {
         new Notice("MyBrain: deep-link token has invalid format");
         return;
       }
-      
+
       let normalizedEndpoint: string | null = null;
-      
+
       if (endpoint) {
         const parsed = parseHttpsEndpoint(endpoint);
-      
+
         if (!parsed) {
           new Notice("MyBrain: deep-link endpoint must be a valid https URL");
           return;
         }
-      
+
         normalizedEndpoint = parsed.href.replace(/\/$/, "");
       }
-      
+
       const incoming: Incoming = {
         token: trimmedToken,
         endpoint: normalizedEndpoint,
@@ -53,12 +53,12 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
       };
 
       const diff = _diffSettings(plugin, incoming);
-      
+
       if (diff.length === 0) {
         new Notice("MyBrain: deep-link settings already match");
         return;
       }
-      
+
       const confirmed = await confirm(plugin.app, {
         title: "MyBrain: confirm deep-link",
         body: (el) => {
@@ -76,7 +76,7 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
       });
 
       if (!confirmed) return;
-      
+
       try {
         await plugin.applyDeepLinkSettings(incoming);
         new Notice("MyBrain: token installed");
@@ -105,7 +105,7 @@ function _diffSettings(plugin: MyBrainPlugin, incoming: Incoming): DiffEntry[] {
       newValue: incoming.endpoint,
     });
   }
-  
+
   if (incoming.vaultId && plugin.settings.vaultId !== incoming.vaultId) {
     diff.push({
       label: "Vault ID",
@@ -113,7 +113,7 @@ function _diffSettings(plugin: MyBrainPlugin, incoming: Incoming): DiffEntry[] {
       newValue: incoming.vaultId,
     });
   }
-  
+
   if (incoming.vaultName && plugin.settings.vaultName !== incoming.vaultName) {
     diff.push({
       label: "Vault name",
@@ -121,7 +121,7 @@ function _diffSettings(plugin: MyBrainPlugin, incoming: Incoming): DiffEntry[] {
       newValue: incoming.vaultName,
     });
   }
-  
+
   return diff;
 }
 

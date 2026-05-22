@@ -14,6 +14,32 @@ In Obsidian: **Settings → Community plugins → Browse** → search for "MyBra
 2. In BRAT: **Add Beta plugin** → `mybrain-ai/obsidian-plugin`.
 3. Enable **MyBrain** in **Settings → Community plugins → Installed plugins**.
 
+### Sideload (manual install / development build)
+
+Use this when you're working on the plugin locally or testing an unreleased version.
+
+1. Clone this repo and install dependencies:
+   ```bash
+   git clone https://github.com/mybrain-ai/obsidian-plugin.git
+   cd obsidian-plugin
+   npm install
+   ```
+2. Build, baking in the ingest endpoint you want the plugin to default to. See [`.env.example`](./.env.example) for the build-time variables; the build fails fast if `MYBRAIN_API_BASE` is unset. Use the dev backend URL when working locally:
+   ```bash
+   MYBRAIN_API_BASE=http://localhost:8000/integrations/obsidian npm run build
+   ```
+   (Or `cp .env.example .env`, edit it, then `set -a && source .env && set +a && npm run build`.) This produces `main.js` in the repo root. `manifest.json` and `styles.css` are already in the repo.
+3. Find your vault's plugin directory. On macOS, Obsidian's vault registry lives at `~/Library/Application Support/obsidian/obsidian.json` (`%APPDATA%\obsidian\obsidian.json` on Windows, `~/.config/obsidian/obsidian.json` on Linux). The plugin folder inside any vault is `<vault>/.obsidian/plugins/mybrain/`.
+4. Copy the three files into that folder, creating it if needed:
+   ```bash
+   mkdir -p "<vault>/.obsidian/plugins/mybrain"
+   cp main.js manifest.json styles.css "<vault>/.obsidian/plugins/mybrain/"
+   ```
+5. In Obsidian: **Settings → Community plugins**. If you see "Restricted mode," turn it off first. Then click **Reload plugins** (or restart Obsidian) and toggle **MyBrain** on under Installed plugins.
+6. Continue with [Configure](#configure) below.
+
+To iterate, re-run step 2 and copy the new `main.js` over; in Obsidian disable then re-enable the plugin (or use the "Hot reload" plugin) to pick up the change.
+
 ## Configure
 
 1. In the MyBrain web app, go to **Settings → Connected Apps → MyBrain Sync (Obsidian)** and click **+ Add a vault**.
