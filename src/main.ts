@@ -173,7 +173,9 @@ export default class MyBrainPlugin extends Plugin {
     this.wsManager.start({
       endpoint: this.settings.endpoint,
       token: this.settings.token,
-      onManifestRequest: () => this.pushManifest({ initial: false }),
+      onManifestRequest: async () => {
+        await this.pushManifest({ initial: false });
+      },
       onTokenRejected: () => {
         this.tokenRejected = true;
       },
@@ -216,14 +218,14 @@ export default class MyBrainPlugin extends Plugin {
     }
   }
 
-  async initialScan(): Promise<void> {
-    await this.pushManifest({ initial: true });
+  async initialScan(): Promise<boolean> {
+    return await this.pushManifest({ initial: true });
   }
 
-  async pushManifest({ initial }: { initial: boolean }): Promise<void> {
+  async pushManifest({ initial }: { initial: boolean }): Promise<boolean> {
     if (!this.canSync()) {
       if (initial) new Notice("MyBrain: set endpoint and token first");
-      return;
+      return false;
     }
 
     const files = this.app.vault
@@ -257,13 +259,15 @@ export default class MyBrainPlugin extends Plugin {
       await this.saveAll();
 
       if (initial) new Notice(`MyBrain: synced ${manifest.length} notes`);
+      return true;
     } catch (e) {
       if (e instanceof TokenRejectedError) {
         this.markTokenRejected();
-        return;
+        return false;
       }
       console.warn("MyBrain: manifest push failed", e);
       if (initial) new Notice("MyBrain: manifest push failed (see console)");
+      return false;
     }
   }
 

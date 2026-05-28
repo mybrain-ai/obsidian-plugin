@@ -170,9 +170,9 @@ export class MyBrainSettingTab extends PluginSettingTab {
 
               await this.plugin.saveSettings();
 
-              await this.plugin.initialScan();
+              const succeeded = await this.plugin.initialScan();
 
-              new Notice("MyBrain: full resync completed");
+              if (succeeded) new Notice("MyBrain: full resync completed");
             } catch (e) {
               console.error("MyBrain: resync failed", e);
               new Notice(

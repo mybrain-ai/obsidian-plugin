@@ -20,12 +20,12 @@ export async function postJson<T>(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return response.json as T;
+  return parseJsonBody<T>(response);
 }
 
 export async function getJson<T>(auth: Auth, path: string): Promise<T> {
   const response = await request(auth, "GET", path);
-  return response.json as T;
+  return parseJsonBody<T>(response);
 }
 
 export async function postMultipart(args: {
@@ -60,6 +60,11 @@ async function request(
   });
   guard(response);
   return response;
+}
+
+function parseJsonBody<T>(response: RequestUrlResponse): T {
+  if (!response.text) return undefined as T;
+  return response.json as T;
 }
 
 function guard(response: RequestUrlResponse): void {
@@ -104,7 +109,7 @@ function buildMultipart(
     out.set(c, offset);
     offset += c.byteLength;
   }
-  
+
   return out.buffer;
 }
 
