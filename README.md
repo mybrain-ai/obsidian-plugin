@@ -42,14 +42,11 @@ To iterate, re-run step 2 and copy the new `main.js` over; in Obsidian disable t
 
 ## Configure
 
-1. In the MyBrain web app, go to **Settings → Connected Apps → MyBrain Sync (Obsidian)** and click **+ Add a vault**.
-2. Copy the bearer token shown once on that page (you won't see it again).
-3. In Obsidian, open the **MyBrain** plugin settings tab.
-4. Paste the bearer token. Confirm the endpoint URL.
-5. Click **Test connection**.
-6. Click **Resync full vault** to send your existing notes. New edits sync automatically.
-
-You can shortcut steps 2–4 by clicking the **Open in Obsidian** button on the token issuance page. It uses the deep link `obsidian://mybrain/install?token=…&endpoint=…&vault_id=…&vault_name=…`, which the plugin registers as a URL protocol handler; you'll be shown a confirmation dialog listing exactly which settings will change (token masked) before anything is written.
+1. In the MyBrain web app, go to **Settings → Connected Apps → MyBrain Sync (Obsidian)** and click **Connect Obsidian**. A dialog appears with two fields, each with a **Copy** button: a bearer token (shown only once) and an endpoint URL.
+2. In Obsidian, open the **MyBrain** plugin settings tab.
+3. Paste the bearer token into the **Token** field and the endpoint URL into the **Endpoint** field.
+4. Click **Test connection**.
+5. Click **Resync full vault** to send your existing notes. New edits sync automatically.
 
 ## What the plugin sends
 

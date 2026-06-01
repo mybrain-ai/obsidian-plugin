@@ -1,7 +1,6 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type MyBrainPlugin from "@/main";
 import { confirm } from "@/ui";
-import { parseHttpsEndpoint } from "@/url";
 
 declare const __MYBRAIN_API_BASE__: string;
 
@@ -36,47 +35,6 @@ export class MyBrainSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-
-    new Setting(containerEl)
-      .setName("Ingest endpoint")
-      .setDesc("Base URL of the MyBrain ingest API (https, no trailing slash).")
-      .addText((text) => {
-        text
-          .setPlaceholder("https://api.mybrain.ai/integrations/obsidian")
-          .setValue(this.plugin.settings.endpoint)
-          .onChange(async (value) => {
-            const cleaned = value.trim().replace(/\/$/, "");
-
-            if (cleaned === "") {
-              text.inputEl.removeClass("mod-error");
-
-              if (this.plugin.settings.endpoint === "") return;
-
-              this.plugin.settings.endpoint = "";
-
-              await this.plugin.saveSettings();
-
-              this.plugin.restartWebSocket();
-
-              return;
-            }
-
-            if (!parseHttpsEndpoint(cleaned)) {
-              text.inputEl.addClass("mod-error");
-              return;
-            }
-
-            text.inputEl.removeClass("mod-error");
-
-            if (this.plugin.settings.endpoint === cleaned) return;
-
-            this.plugin.settings.endpoint = cleaned;
-
-            await this.plugin.saveSettings();
-
-            this.plugin.restartWebSocket();
-          });
-      });
 
     new Setting(containerEl)
       .setName("Bearer token")

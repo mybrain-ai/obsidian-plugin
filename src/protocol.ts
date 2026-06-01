@@ -56,6 +56,7 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
 
       if (diff.length === 0) {
         new Notice("MyBrain: deep-link settings already match");
+        _openPluginSettings(plugin);
         return;
       }
 
@@ -80,12 +81,35 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
       try {
         await plugin.applyDeepLinkSettings(incoming);
         new Notice("MyBrain: token installed");
+
+        _openPluginSettings(plugin);
       } catch (e) {
         console.error("MyBrain: failed to save deep-link settings", e);
         new Notice("MyBrain: failed to save settings — see console");
       }
     },
   );
+}
+
+function _openPluginSettings(plugin: MyBrainPlugin): void {
+  // `app.setting` isn't in Obsidian's public types but is the standard way
+  // for plugins to open the settings modal — used across the community plugin
+  // ecosystem.
+  try {
+    const setting = (
+      plugin.app as unknown as {
+        setting?: {
+          open?: () => void;
+          openTabById?: (id: string) => void;
+        };
+      }
+    ).setting;
+
+    setting?.open?.();
+    setting?.openTabById?.(plugin.manifest.id);
+  } catch (e) {
+    console.warn("MyBrain: could not open plugin settings", e);
+  }
 }
 
 function _diffSettings(plugin: MyBrainPlugin, incoming: Incoming): DiffEntry[] {
