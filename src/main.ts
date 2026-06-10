@@ -246,7 +246,7 @@ export default class MyBrainPlugin extends Plugin {
     }
 
     try {
-      const response = await postJson<IngestResponse>(
+      const response = await postJson<IngestResponse | undefined>(
         this.auth(),
         "/manifest",
         {
@@ -263,11 +263,14 @@ export default class MyBrainPlugin extends Plugin {
 
       await this.saveAll();
 
-      if (response.attachmentsNeeded.length > 0) {
-        await this.uploadAttachmentsForBatch(response.attachmentsNeeded);
+      const attachmentsNeeded = response?.attachmentsNeeded ?? [];
+
+      if (attachmentsNeeded.length > 0) {
+        await this.uploadAttachmentsForBatch(attachmentsNeeded);
       }
 
       if (initial) new Notice(`MyBrain: synced ${manifest.length} notes`);
+      
       return true;
     } catch (e) {
       if (e instanceof TokenRejectedError) {
