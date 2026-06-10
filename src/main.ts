@@ -42,10 +42,11 @@ import {
 import { extractLinks } from "@/util";
 import { ObsidianWebSocketManager } from "@/websocket";
 
-type ManifestFile = Omit<
+type FileSnapshot = Omit<
   UpsertEvent,
   "op" | "wikilinks" | "mdLinks" | "attachments"
 >;
+type ManifestFile = Omit<UpsertEvent, "op" | "wikilinks" | "mdLinks">;
 
 type ReadFile = {
   content: string;
@@ -238,25 +239,33 @@ export default class MyBrainPlugin extends Plugin {
 
     for (const file of files) {
       try {
-        manifest.push(await this.buildFileSnapshot(file));
+        manifest.push(await this._buildManifestFile(file));
       } catch (e) {
         console.error("MyBrain: failed to read", file.path, e);
       }
     }
 
     try {
-      await postJson(this.auth(), "/manifest", {
-        apiVersion: API_VERSION,
-        vaultId: this.settings.vaultId,
-        vaultName: this.settings.vaultName || this.app.vault.getName(),
-        clientTime: new Date().toISOString(),
-        files: manifest,
-      });
+      const response = await postJson<IngestResponse>(
+        this.auth(),
+        "/manifest",
+        {
+          apiVersion: API_VERSION,
+          vaultId: this.settings.vaultId,
+          vaultName: this.settings.vaultName || this.app.vault.getName(),
+          clientTime: new Date().toISOString(),
+          files: manifest,
+        },
+      );
 
       this.tokenRejected = false;
       this.settings.lastSyncAt = Date.now();
 
       await this.saveAll();
+
+      if (response.attachmentsNeeded.length > 0) {
+        await this.uploadAttachmentsForBatch(response.attachmentsNeeded);
+      }
 
       if (initial) new Notice(`MyBrain: synced ${manifest.length} notes`);
       return true;
@@ -389,7 +398,7 @@ export default class MyBrainPlugin extends Plugin {
     };
   }
 
-  private async buildFileSnapshot(file: TFile): Promise<ManifestFile> {
+  private async buildFileSnapshot(file: TFile): Promise<FileSnapshot> {
     const read = await this.readMarkdownFile(file);
 
     return {
@@ -401,6 +410,21 @@ export default class MyBrainPlugin extends Plugin {
       mtime: file.stat.mtime,
       size: file.stat.size,
       hash: read.hash,
+    };
+  }
+
+  private async _buildManifestFile(file: TFile): Promise<ManifestFile> {
+    const snapshot = await this.buildFileSnapshot(file);
+
+    const resolved = await resolveAttachments(this.app, file);
+
+    for (const r of resolved) {
+      this.resolvedAttachments.set(r.ref.hash, r);
+    }
+
+    return {
+      ...snapshot,
+      attachments: resolved.map((r) => r.ref),
     };
   }
 
