@@ -28,7 +28,11 @@ jobs:
         run: |
           assets=(main.js manifest.json)
           [ -f styles.css ] && assets+=(styles.css)
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes-file CHANGELOG.md \
-            "${assets[@]}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file CHANGELOG.md \
+              "${assets[@]}"
+          fi
