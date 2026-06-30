@@ -2,6 +2,10 @@
 
 All notable changes to MyBrain are documented here.
 
+## 1.0.1
+
+- Removed the funding link from the plugin listing.
+
 ## 1.0.0
 
 Initial release.
