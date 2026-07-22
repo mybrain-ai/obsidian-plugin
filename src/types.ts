@@ -1,3 +1,5 @@
+export type FolderNode = { path: string; name: string; parent: string | null };
+
 export type AttachmentRef = {
   path: string;
   ext: string;

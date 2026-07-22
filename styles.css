@@ -1,4 +1,29 @@
+.mybrain-token-control {
+  flex-wrap: wrap;
+  /* Vertically center the field (and its actions row) against the tall
+     description on the left. */
+  align-self: center;
+  align-content: center;
+}
+
 .mybrain-token-input {
   font-family: var(--font-monospace);
   width: 100%;
+  min-width: 22em;
+}
+
+.mybrain-token-actions {
+  /* Own line below the input, inside the setting card. */
+  flex-basis: 100%;
+  display: flex;
+  gap: var(--size-4-2);
+  justify-content: flex-end;
+  margin-top: var(--size-4-2);
+  /* Reserve the row's height at all times so toggling the buttons doesn't
+     shift the settings below. */
+  visibility: hidden;
+}
+
+.mybrain-token-actions-visible {
+  visibility: visible;
 }

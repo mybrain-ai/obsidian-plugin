@@ -15,11 +15,13 @@ import {
   BATCH_SIZE,
   DEBOUNCE_MS,
   DRAIN_INTERVAL_MS,
+  ROOT_SCOPE_SENTINEL,
   TOKEN_REJECTED_NOTICE,
 } from "@/constants";
 import { sha256 } from "@/hash";
 import { getJson, postJson, TokenRejectedError, type Auth } from "@/network";
 import { registerInstallProtocolHandler } from "@/protocol";
+import { enumerateVaultTree } from "@/scope";
 import {
   ackBatch,
   emptyState,
@@ -161,6 +163,12 @@ export default class MyBrainPlugin extends Plugin {
     await this.saveSettings();
 
     this.restartWebSocket();
+
+    // A deep link (re)configures the connection, so start syncing right away
+    // instead of waiting for a server manifest_request or the next reload.
+    if (this.canSync()) {
+      void this.pushManifest({ initial: true });
+    }
   }
 
   private doRestartWebSocket(): void {
@@ -175,6 +183,11 @@ export default class MyBrainPlugin extends Plugin {
       endpoint: this.settings.endpoint,
       token: this.settings.token,
       onManifestRequest: async () => {
+        await this.pushManifest({ initial: false });
+      },
+      onScopeChanged: async (folders) => {
+        this.settings.inScopeFolders = folders;
+        await this.saveSettings();
         await this.pushManifest({ initial: false });
       },
       onTokenRejected: () => {
@@ -231,7 +244,7 @@ export default class MyBrainPlugin extends Plugin {
 
     const files = this.app.vault
       .getMarkdownFiles()
-      .filter((f) => !this.isExcluded(f.path));
+      .filter((f) => this.isInScope(f.path));
 
     if (initial) new Notice(`MyBrain: syncing ${files.length} notes...`);
 
@@ -255,6 +268,7 @@ export default class MyBrainPlugin extends Plugin {
           vaultName: this.settings.vaultName || this.app.vault.getName(),
           clientTime: new Date().toISOString(),
           files: manifest,
+          folders: enumerateVaultTree(this.app),
         },
       );
 
@@ -270,7 +284,7 @@ export default class MyBrainPlugin extends Plugin {
       }
 
       if (initial) new Notice(`MyBrain: synced ${manifest.length} notes`);
-      
+
       return true;
     } catch (e) {
       if (e instanceof TokenRejectedError) {
@@ -294,7 +308,7 @@ export default class MyBrainPlugin extends Plugin {
 
     const stale = this.app.vault
       .getMarkdownFiles()
-      .filter((f) => !this.isExcluded(f.path) && f.stat.mtime > since);
+      .filter((f) => this.isInScope(f.path) && f.stat.mtime > since);
 
     if (stale.length === 0) return;
 
@@ -337,7 +351,7 @@ export default class MyBrainPlugin extends Plugin {
   private handleRename(file: TAbstractFile, oldPath: string): void {
     if (!(file instanceof TFile) || file.extension !== "md") return;
 
-    if (this.isExcluded(file.path) && this.isExcluded(oldPath)) return;
+    if (!this.isInScope(file.path) && !this.isInScope(oldPath)) return;
 
     this.scheduleFlush(file.path, async () => {
       this.queue = enqueue(this.queue, {
@@ -362,11 +376,16 @@ export default class MyBrainPlugin extends Plugin {
     return (
       file instanceof TFile &&
       file.extension === "md" &&
-      !this.isExcluded(file.path)
+      this.isInScope(file.path)
     );
   }
 
   private async enqueueUpsertEvent(file: TFile): Promise<void> {
+    // Re-check scope at flush time: a scope change can land while this file
+    // sits in the debounce window, and we must not enqueue a note the new
+    // scope excludes.
+    if (!this.isInScope(file.path)) return;
+
     try {
       const event = await this.buildUpsertEvent(file);
 
@@ -560,10 +579,19 @@ export default class MyBrainPlugin extends Plugin {
     return Boolean(this.settings.token && this.settings.endpoint);
   }
 
-  private isExcluded(path: string): boolean {
-    if (path.startsWith(`${this.app.vault.configDir}/`)) return true;
-    return this.settings.excludeFolders.some(
-      (prefix) => path === prefix || path.startsWith(`${prefix}/`),
-    );
+  private isInScope(path: string): boolean {
+    if (path.startsWith(`${this.app.vault.configDir}/`)) return false;
+
+    const scope = this.settings.inScopeFolders;
+
+    if (scope.length === 0) return true;
+
+    return scope.some((prefix) => {
+      // The root sentinel matches files directly in the vault root (no folder
+      // segment); any other entry is a folder prefix.
+      if (prefix === ROOT_SCOPE_SENTINEL) return !path.includes("/");
+
+      return path === prefix || path.startsWith(`${prefix}/`);
+    });
   }
 }
