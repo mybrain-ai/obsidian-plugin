@@ -1,4 +1,11 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import {
+  App,
+  ButtonComponent,
+  Notice,
+  PluginSettingTab,
+  Setting,
+  TextComponent,
+} from "obsidian";
 import type MyBrainPlugin from "@/main";
 import { confirm } from "@/ui";
 
@@ -7,7 +14,7 @@ declare const __MYBRAIN_API_BASE__: string;
 export interface MyBrainSettings {
   endpoint: string;
   token: string;
-  excludeFolders: string[];
+  inScopeFolders: string[];
   vaultId: string;
   vaultName: string;
   lastSyncAt: number | null;
@@ -17,7 +24,7 @@ export interface MyBrainSettings {
 export const DEFAULT_SETTINGS: MyBrainSettings = {
   endpoint: __MYBRAIN_API_BASE__,
   token: "",
-  excludeFolders: [],
+  inScopeFolders: [],
   vaultId: "",
   vaultName: "",
   lastSyncAt: null,
@@ -36,47 +43,54 @@ export class MyBrainSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    new Setting(containerEl)
+    let tokenInput!: TextComponent;
+    let actions!: HTMLElement;
+
+    const tokenSetting = new Setting(containerEl)
       .setName("Bearer token")
       .setDesc(
         "Paste the token from the MyBrain Connect Obsidian page. Activates on first POST. Stored in plain text inside this vault's plugin data — avoid storing production tokens in synced or shared vaults, and rotate the token in the MyBrain web app if the vault is compromised.",
       )
       .addText((text) => {
+        tokenInput = text;
         text
           .setPlaceholder("mbr_sk_live_...")
           .setValue(this.plugin.settings.token)
-          .onChange(async (value) => {
-            const trimmed = value.trim();
-
-            if (this.plugin.settings.token === trimmed) return;
-
-            this.plugin.settings.token = trimmed;
-
-            await this.plugin.saveSettings();
-
-            this.plugin.restartWebSocket();
-          });
+          .onChange(() => this._refreshTokenActions(tokenInput, actions));
         text.inputEl.addClass("mybrain-token-input");
       });
 
-    new Setting(containerEl)
-      .setName("Exclude folders")
-      .setDesc(
-        "One folder path per line. Notes under these prefixes are skipped.",
-      )
-      .addTextArea((area) => {
-        area
-          .setPlaceholder("Templates\nArchive/old")
-          .setValue(this.plugin.settings.excludeFolders.join("\n"))
-          .onChange(async (value) => {
-            this.plugin.settings.excludeFolders = value
-              .split("\n")
-              .map((line) => line.trim())
-              .filter((line) => line.length > 0);
-            await this.plugin.saveSettings();
-          });
-        area.inputEl.rows = 4;
+    // Save/Cancel go inside this setting's control, on their own right-aligned
+    // row below the field (the control is allowed to wrap). The row always
+    // reserves its height (hidden via `visibility`), so showing it on edit
+    // doesn't shift the settings below.
+    tokenSetting.controlEl.addClass("mybrain-token-control");
+    actions = tokenSetting.controlEl.createDiv({
+      cls: "mybrain-token-actions",
+    });
+
+    new ButtonComponent(actions)
+      .setButtonText("Save")
+      .setCta()
+      .onClick(async () => {
+        const trimmed = tokenInput.getValue().trim();
+
+        tokenInput.setValue(trimmed);
+        this.plugin.settings.token = trimmed;
+
+        await this.plugin.saveSettings();
+
+        this.plugin.restartWebSocket();
+
+        this._refreshTokenActions(tokenInput, actions);
       });
+
+    new ButtonComponent(actions).setButtonText("Cancel").onClick(() => {
+      tokenInput.setValue(this.plugin.settings.token);
+      this._refreshTokenActions(tokenInput, actions);
+    });
+
+    this._refreshTokenActions(tokenInput, actions);
 
     new Setting(containerEl)
       .setName("Sync attachments on mobile")
@@ -141,5 +155,14 @@ export class MyBrainSettingTab extends PluginSettingTab {
             }
           }),
       );
+  }
+
+  private _refreshTokenActions(
+    input: TextComponent,
+    actions: HTMLElement,
+  ): void {
+    const dirty = input.getValue().trim() !== this.plugin.settings.token;
+
+    actions.toggleClass("mybrain-token-actions-visible", dirty);
   }
 }

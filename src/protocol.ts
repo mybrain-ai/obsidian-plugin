@@ -80,7 +80,9 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
 
       try {
         await plugin.applyDeepLinkSettings(incoming);
-        new Notice("MyBrain: token installed");
+        new Notice(
+          "MyBrain: token installed — open Settings → MyBrain to check the connection.",
+        );
 
         _openPluginSettings(plugin);
       } catch (e) {
@@ -92,24 +94,34 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
 }
 
 function _openPluginSettings(plugin: MyBrainPlugin): void {
-  // `app.setting` isn't in Obsidian's public types but is the standard way
-  // for plugins to open the settings modal — used across the community plugin
-  // ecosystem.
-  try {
-    const setting = (
-      plugin.app as unknown as {
-        setting?: {
-          open?: () => void;
-          openTabById?: (id: string) => void;
-        };
-      }
-    ).setting;
+  const openSettings = (): void => {
+    // `app.setting` isn't in Obsidian's public types but is the standard way
+    // for plugins to open the settings modal — used across the community
+    // plugin ecosystem.
+    try {
+      const setting = (
+        plugin.app as unknown as {
+          setting?: {
+            open?: () => void;
+            openTabById?: (id: string) => void;
+          };
+        }
+      ).setting;
 
-    setting?.open?.();
-    setting?.openTabById?.(plugin.manifest.id);
-  } catch (e) {
-    console.warn("MyBrain: could not open plugin settings", e);
-  }
+      setting?.open?.();
+      setting?.openTabById?.(plugin.manifest.id);
+    } catch (e) {
+      console.warn("MyBrain: could not open plugin settings", e);
+    }
+  };
+
+  // Defer until the workspace is ready and the confirm modal has finished
+  // closing. Opening the settings window synchronously from the protocol
+  // handler can silently no-op — especially when Obsidian was just launched
+  // by the deep link — leaving the user with no visible result.
+  plugin.app.workspace.onLayoutReady(() =>
+    globalThis.setTimeout(openSettings, 0),
+  );
 }
 
 function _diffSettings(plugin: MyBrainPlugin, incoming: Incoming): DiffEntry[] {

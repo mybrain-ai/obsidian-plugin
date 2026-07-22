@@ -5,16 +5,19 @@ import { TOKEN_REJECTED_NOTICE } from "@/constants";
 import { toWsUrl } from "@/url";
 
 type ManifestRequestHandler = () => Promise<void> | void;
+type ScopeChangedHandler = (folders: string[]) => Promise<void> | void;
 type TokenRejectedHandler = () => void;
 
 interface ManagerOptions {
   endpoint: string;
   token: string;
   onManifestRequest: ManifestRequestHandler;
+  onScopeChanged: ScopeChangedHandler;
   onTokenRejected: TokenRejectedHandler;
 }
 
-type WsServerMessage = { type: "manifest_request" };
+type WsServerMessage =
+  { type: "manifest_request" } | { type: "scope_changed"; folders: string[] };
 
 const RECONNECT_DELAYS_MS = [1_000, 5_000, 15_000, 30_000, 60_000];
 
@@ -45,7 +48,7 @@ export class ObsidianWebSocketManager {
       globalThis.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    
+
     if (this.socket) {
       try {
         this.socket.close();
@@ -60,21 +63,21 @@ export class ObsidianWebSocketManager {
     const opts = this.options;
 
     if (!opts || this.stopped) return;
-    
+
     const url = toWsUrl(opts.endpoint);
-    
+
     if (!url) {
       console.warn("MyBrain WS: invalid endpoint", opts.endpoint);
       return;
     }
-    
+
     if (!isHttpTokenChars(opts.token)) {
       console.warn(
         "MyBrain WS: token contains characters that are not valid in a WebSocket subprotocol; not connecting",
       );
       return;
     }
-    
+
     try {
       const subprotocol = `bearer.${opts.token}`;
       const ws = new WebSocket(url, subprotocol);
@@ -105,14 +108,14 @@ export class ObsidianWebSocketManager {
     );
 
     this.socket = null;
-    
+
     if (event.code === 4401) {
       this.stopped = true;
       this.options?.onTokenRejected();
       new Notice(TOKEN_REJECTED_NOTICE);
       return;
     }
-    
+
     if (STOP_RECONNECT_CODES.has(event.code)) {
       this.stopped = true;
       new Notice(
@@ -120,7 +123,7 @@ export class ObsidianWebSocketManager {
       );
       return;
     }
-    
+
     this.scheduleReconnect();
   }
 
@@ -128,14 +131,23 @@ export class ObsidianWebSocketManager {
     if (!this.options) return;
 
     const parsed = parseServerMessage(event.data);
-    
+
     if (parsed === null) return;
-    
+
     if (parsed.type === "manifest_request") {
       try {
         await this.options.onManifestRequest();
       } catch (e) {
         console.warn("MyBrain WS: manifest_request handler failed", e);
+      }
+      return;
+    }
+
+    if (parsed.type === "scope_changed") {
+      try {
+        await this.options.onScopeChanged(parsed.folders);
+      } catch (e) {
+        console.warn("MyBrain WS: scope_changed handler failed", e);
       }
     }
   }
@@ -146,7 +158,7 @@ export class ObsidianWebSocketManager {
     const delay = nextBackoffDelay(this.reconnectAttempt, RECONNECT_DELAYS_MS, {
       jitter: true,
     });
-    
+
     this.reconnectAttempt += 1;
     this.reconnectTimer = globalThis.setTimeout(() => {
       this.reconnectTimer = null;
@@ -159,23 +171,31 @@ function parseServerMessage(data: unknown): WsServerMessage | null {
   if (typeof data !== "string") return null;
 
   let parsed: unknown;
-  
+
   try {
     parsed = JSON.parse(data);
   } catch {
     return null;
   }
-  
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    !("type" in parsed) ||
-    parsed.type !== "manifest_request"
-  ) {
+
+  if (!parsed || typeof parsed !== "object" || !("type" in parsed)) {
     return null;
   }
-  
-  return { type: "manifest_request" };
+
+  if (parsed.type === "manifest_request") {
+    return { type: "manifest_request" };
+  }
+
+  if (
+    parsed.type === "scope_changed" &&
+    "folders" in parsed &&
+    Array.isArray(parsed.folders) &&
+    parsed.folders.every((f) => typeof f === "string")
+  ) {
+    return { type: "scope_changed", folders: parsed.folders as string[] };
+  }
+
+  return null;
 }
 
 function isHttpTokenChars(value: string): boolean {
