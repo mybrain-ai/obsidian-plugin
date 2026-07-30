@@ -75,6 +75,11 @@ export default class MyBrainPlugin extends Plugin {
   private draining = false;
   private tokenRejected = false;
   private unloaded = false;
+  // Number of full-vault syncs (`pushManifest`) in flight. A counter, not a
+  // flag, so overlapping pushes (e.g. a deep-link sync plus a server-requested
+  // one) don't flip the UI back to idle while another is still running.
+  private syncActiveCount = 0;
+  private readonly syncListeners = new Set<() => void>();
   private readonly wsManager = new ObsidianWebSocketManager();
 
   private readonly debouncedWsRestart = debounce(
@@ -139,6 +144,18 @@ export default class MyBrainPlugin extends Plugin {
    * character. */
   restartWebSocket(): void {
     this.debouncedWsRestart();
+  }
+
+  /** Whether a full-vault sync is currently uploading. */
+  isSyncing(): boolean {
+    return this.syncActiveCount > 0;
+  }
+
+  /** Subscribe to sync start/stop so the settings UI can reflect it live.
+   * Returns an unsubscribe function. */
+  onSyncStateChange(listener: () => void): () => void {
+    this.syncListeners.add(listener);
+    return () => this.syncListeners.delete(listener);
   }
 
   /** Public — called by `protocol.ts` when a deep-link installs new
@@ -242,6 +259,16 @@ export default class MyBrainPlugin extends Plugin {
       return false;
     }
 
+    this._beginSync();
+
+    try {
+      return await this._runFullSync(initial);
+    } finally {
+      this._endSync();
+    }
+  }
+
+  private async _runFullSync(initial: boolean): Promise<boolean> {
     const files = this.app.vault
       .getMarkdownFiles()
       .filter((f) => this.isInScope(f.path));
@@ -294,6 +321,28 @@ export default class MyBrainPlugin extends Plugin {
       console.warn("MyBrain: manifest push failed", e);
       if (initial) new Notice("MyBrain: manifest push failed (see console)");
       return false;
+    }
+  }
+
+  private _beginSync(): void {
+    this.syncActiveCount += 1;
+
+    if (this.syncActiveCount === 1) this._notifySyncStateChange();
+  }
+
+  private _endSync(): void {
+    this.syncActiveCount = Math.max(0, this.syncActiveCount - 1);
+
+    if (this.syncActiveCount === 0) this._notifySyncStateChange();
+  }
+
+  private _notifySyncStateChange(): void {
+    for (const listener of this.syncListeners) {
+      try {
+        listener();
+      } catch (e) {
+        console.warn("MyBrain: sync-state listener failed", e);
+      }
     }
   }
 
@@ -468,7 +517,9 @@ export default class MyBrainPlugin extends Plugin {
   private scheduleFlush(key: string, fn: () => Promise<void>): void {
     const existing = this.pendingFlushTimers.get(key);
 
-    if (existing) globalThis.clearTimeout(existing);
+    if (existing) {
+      globalThis.clearTimeout(existing);
+    }
 
     const timer = globalThis.setTimeout(() => {
       this.pendingFlushTimers.delete(key);

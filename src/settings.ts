@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS: MyBrainSettings = {
 
 export class MyBrainSettingTab extends PluginSettingTab {
   readonly plugin: MyBrainPlugin;
+  private unsubscribeSyncState: (() => void) | null = null;
 
   constructor(app: App, plugin: MyBrainPlugin) {
     super(app, plugin);
@@ -42,6 +43,11 @@ export class MyBrainSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+
+    // Re-rendered on open; drop any subscription from the previous render so we
+    // don't accumulate stale listeners.
+    this.unsubscribeSyncState?.();
+    this.unsubscribeSyncState = null;
 
     let tokenInput!: TextComponent;
     let actions!: HTMLElement;
@@ -116,12 +122,19 @@ export class MyBrainSettingTab extends PluginSettingTab {
         }),
       );
 
+    const syncStatus = new Setting(containerEl)
+      .setName("Sync status")
+      .setDesc(this._syncStatusText());
+
+    let resyncButton!: ButtonComponent;
+
     new Setting(containerEl)
       .setName("Resync full vault")
       .setDesc(
         "Clears the local sync watermark and re-uploads every markdown file.",
       )
-      .addButton((btn) =>
+      .addButton((btn) => {
+        resyncButton = btn;
         btn
           .setButtonText("Resync")
           .setWarning()
@@ -134,8 +147,6 @@ export class MyBrainSettingTab extends PluginSettingTab {
             });
 
             if (!ok) return;
-
-            btn.setDisabled(true).setButtonText("Resyncing…");
 
             try {
               this.plugin.settings.lastSyncAt = null;
@@ -150,11 +161,38 @@ export class MyBrainSettingTab extends PluginSettingTab {
               new Notice(
                 `MyBrain: resync failed — ${e instanceof Error ? e.message : String(e)}`,
               );
-            } finally {
-              btn.setDisabled(false).setButtonText("Resync");
             }
-          }),
-      );
+          });
+      });
+
+    // The Resync button and status line reflect any full sync — a deep-link or
+    // startup auto-sync, not just a manual click — so the button is disabled
+    // whenever one is running.
+    const applySyncState = (): void => {
+      const syncing = this.plugin.isSyncing();
+
+      syncStatus.setDesc(this._syncStatusText());
+      resyncButton.setDisabled(syncing);
+      resyncButton.setButtonText(syncing ? "Syncing…" : "Resync");
+    };
+
+    applySyncState();
+    this.unsubscribeSyncState = this.plugin.onSyncStateChange(applySyncState);
+  }
+
+  hide(): void {
+    this.unsubscribeSyncState?.();
+    this.unsubscribeSyncState = null;
+  }
+
+  private _syncStatusText(): string {
+    if (this.plugin.isSyncing()) return "Syncing your vault…";
+
+    const at = this.plugin.settings.lastSyncAt;
+
+    if (at) return `Last synced ${new Date(at).toLocaleString()}`;
+
+    return "Not synced yet";
   }
 
   private _refreshTokenActions(
