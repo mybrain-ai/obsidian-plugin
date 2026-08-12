@@ -2,6 +2,13 @@
 
 All notable changes to MyBrain are documented here.
 
+## 1.0.2
+
+- Server-defined sync scope: the set of folders to sync is now driven by the server rather than only the client-side exclude list. Scope changes pushed over the WebSocket are applied live and trigger a re-sync, and scope is re-checked when a queued note flushes so a mid-edit scope change can't upload a now-excluded note.
+- The plugin now sends the full vault folder tree alongside the manifest, so the connector can render a folder navigator server-side.
+- Deep-link install now starts syncing immediately after settings are applied, instead of waiting for a server manifest request or the next reload.
+- Settings tab shows live sync status, reflecting in real time whether a full-vault sync is currently uploading (overlapping syncs are tracked so the indicator doesn't flip to idle while one is still running).
+
 ## 1.0.1
 
 - Removed the funding link from the plugin listing.

@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "[0-9]*.[0-9]*.[0-9]*"
+  workflow_call:
+    inputs:
+      tag:
+        description: "Version tag to build and release"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -24,7 +32,7 @@ jobs:
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           assets=(main.js manifest.json)
           [ -f styles.css ] && assets+=(styles.css)
