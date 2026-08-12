@@ -29,6 +29,17 @@ jobs:
       - run: npm run build
         env:
           MYBRAIN_API_BASE: ${{ vars.MYBRAIN_API_BASE }}
+      - name: Extract release notes
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          awk -v v="## $TAG" '
+            $0 == v {flag=1; next}
+            /^## / && flag {exit}
+            flag {print}
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          # Fall back to the full changelog if this version has no section.
+          [ -s RELEASE_NOTES.md ] || cp CHANGELOG.md RELEASE_NOTES.md
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -41,6 +52,6 @@ jobs:
           else
             gh release create "$TAG" \
               --title "$TAG" \
-              --notes-file CHANGELOG.md \
+              --notes-file RELEASE_NOTES.md \
               "${assets[@]}"
           fi

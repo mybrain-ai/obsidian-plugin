@@ -9,12 +9,15 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit",
-    "release": "node scripts/bump-version.mjs"
+    "release": "node scripts/bump-version.mjs",
+    "check:changelog": "node scripts/check-changelog.mjs",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.21.5",
+    "husky": "^9.1.7",
     "obsidian": "^1.5.7",
     "tslib": "^2.6.3",
     "typescript": "^5.5.0"
