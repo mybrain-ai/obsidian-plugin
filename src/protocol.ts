@@ -93,6 +93,15 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
   );
 }
 
+/** `obsidian://mybrain/open` — jump straight to the plugin's settings view.
+ * Used by the MyBrain web app (e.g. the connector page's "Open in Obsidian"
+ * action, and as the landing spot when an update is available). */
+export function registerOpenProtocolHandler(plugin: MyBrainPlugin): void {
+  plugin.registerObsidianProtocolHandler("mybrain/open", () => {
+    _openPluginSettings(plugin);
+  });
+}
+
 function _openPluginSettings(plugin: MyBrainPlugin): void {
   const openSettings = (): void => {
     // `app.setting` isn't in Obsidian's public types but is the standard way

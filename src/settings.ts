@@ -6,8 +6,12 @@ import {
   Setting,
   TextComponent,
 } from "obsidian";
+import { UPDATE_LATEST_VERSION_KEY } from "@/constants";
+import { loadDeviceValue } from "@/device";
 import type MyBrainPlugin from "@/main";
 import { confirm } from "@/ui";
+import { checkForUpdates } from "@/update";
+import { compareVersions } from "@/version";
 
 declare const __MYBRAIN_API_BASE__: string;
 
@@ -178,11 +182,41 @@ export class MyBrainSettingTab extends PluginSettingTab {
 
     applySyncState();
     this.unsubscribeSyncState = this.plugin.onSyncStateChange(applySyncState);
+
+    const versionSetting = new Setting(containerEl)
+      .setName("Plugin version")
+      .setDesc(this._versionText());
+
+    versionSetting.addButton((btn) =>
+      btn.setButtonText("Check for updates").onClick(async () => {
+        btn.setDisabled(true);
+        btn.setButtonText("Checking…");
+
+        try {
+          await checkForUpdates(this.plugin, { manual: true });
+          versionSetting.setDesc(this._versionText());
+        } finally {
+          btn.setDisabled(false);
+          btn.setButtonText("Check for updates");
+        }
+      }),
+    );
   }
 
   hide(): void {
     this.unsubscribeSyncState?.();
     this.unsubscribeSyncState = null;
+  }
+
+  private _versionText(): string {
+    const installed = this.plugin.manifest.version;
+    const latest = loadDeviceValue(this.app, UPDATE_LATEST_VERSION_KEY);
+
+    if (latest && compareVersions(installed, latest) < 0) {
+      return `Currently installed: ${installed} — update available: ${latest}`;
+    }
+
+    return `Currently installed: ${installed}`;
   }
 
   private _syncStatusText(): string {

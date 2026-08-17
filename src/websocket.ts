@@ -192,7 +192,7 @@ function parseServerMessage(data: unknown): WsServerMessage | null {
     Array.isArray(parsed.folders) &&
     parsed.folders.every((f) => typeof f === "string")
   ) {
-    return { type: "scope_changed", folders: parsed.folders as string[] };
+    return { type: "scope_changed", folders: parsed.folders };
   }
 
   return null;

@@ -1,6 +1,11 @@
 import { requestUrl, type RequestUrlResponse } from "obsidian";
 
-export type Auth = { endpoint: string; token: string };
+export type Auth = {
+  endpoint: string;
+  token: string;
+  deviceId: string;
+  pluginVersion: string;
+};
 
 export class TokenRejectedError extends Error {
   constructor() {
@@ -53,6 +58,8 @@ async function request(
     method,
     headers: {
       ...init.headers,
+      "X-MyBrain-Device-Id": auth.deviceId,
+      "X-MyBrain-Plugin-Version": auth.pluginVersion,
       Authorization: `Bearer ${auth.token}`,
     },
     body: init.body,
@@ -122,6 +129,11 @@ function escapeFieldValue(value: string): string {
 }
 
 function sanitizeContentType(value: string): string {
-  if (/[\u0000-\u001f\u007f]/.test(value)) return "application/octet-stream";
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+
+    if (code <= 0x1f || code === 0x7f) return "application/octet-stream";
+  }
+
   return value;
 }

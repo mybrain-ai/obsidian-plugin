@@ -27,8 +27,6 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run build
-        env:
-          MYBRAIN_API_BASE: ${{ vars.MYBRAIN_API_BASE }}
       - name: Extract release notes
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
