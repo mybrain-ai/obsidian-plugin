@@ -1,15 +1,15 @@
 import esbuild from "esbuild";
+import { builtinModules } from "node:module";
 import process from "node:process";
-import builtins from "builtin-modules";
 
 const prod = process.argv[2] === "production";
 
-const apiBase = process.env.MYBRAIN_API_BASE;
-
-if (!apiBase) {
-  console.error("MYBRAIN_API_BASE is not set");
-  process.exit(1);
-}
+// Baked in as the default ingest endpoint, so `npm run build` (including the
+// community directory's build verification) is reproducible with no
+// environment. Local development doesn't need to change this: connecting via
+// the deep link stores the local backend's endpoint in the plugin settings,
+// which always take precedence over this default.
+const apiBase = "https://backend.mybrain.ai/integrations/obsidian";
 
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
@@ -31,7 +31,8 @@ const context = await esbuild.context({
     "@lezer/common",
     "@lezer/highlight",
     "@lezer/lr",
-    ...builtins,
+    "node:*",
+    ...builtinModules,
   ],
   define: {
     __MYBRAIN_API_BASE__: JSON.stringify(apiBase),

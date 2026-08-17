@@ -18,5 +18,3 @@ jobs:
       - run: npm run check:changelog
       - run: npm run typecheck
       - run: npm run build
-        env:
-          MYBRAIN_API_BASE: ${{ vars.MYBRAIN_API_BASE }}

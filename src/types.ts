@@ -34,3 +34,9 @@ export type IngestResponse = {
 };
 
 export const API_VERSION = 1;
+
+/** Latest published plugin release, as served by `GET /latest-release`. */
+export type LatestPluginRelease = {
+  version: string;
+  notes: string;
+};

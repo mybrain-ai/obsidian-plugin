@@ -2,6 +2,14 @@
 
 All notable changes to MyBrain are documented here.
 
+## 1.0.3
+
+- Update notifications: once connected, the plugin checks for new releases once a day via your MyBrain endpoint (and on demand via a "Check for updates" button in settings) and shows a notice with the release notes and update instructions. No files are changed automatically — updating still happens through BRAT or the Obsidian community-plugin updater.
+- Updates can be skipped per version; skipping applies only to the current device and the reminder re-arms on the next release. Even for skipped versions, the settings tab keeps showing that an update is available.
+- The plugin reports its installed version to MyBrain, so the web app can show an update notice for the connected vault.
+- New `obsidian://mybrain/open` deep link opens the plugin's settings view — the MyBrain web app uses it to jump from the connector page straight into the plugin.
+- Now requires Obsidian 1.8.7 or newer.
+
 ## 1.0.2
 
 - Server-defined sync scope: the set of folders to sync is now driven by the server rather than only the client-side exclude list. Scope changes pushed over the WebSocket are applied live and trigger a re-sync, and scope is re-checked when a queued note flushes so a mid-edit scope change can't upload a now-excluded note.

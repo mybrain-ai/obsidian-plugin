@@ -17,10 +17,15 @@ import {
   DRAIN_INTERVAL_MS,
   ROOT_SCOPE_SENTINEL,
   TOKEN_REJECTED_NOTICE,
+  UPDATE_CHECK_TICK_MS,
 } from "@/constants";
+import { getOrCreateDeviceId } from "@/device";
 import { sha256 } from "@/hash";
 import { getJson, postJson, TokenRejectedError, type Auth } from "@/network";
-import { registerInstallProtocolHandler } from "@/protocol";
+import {
+  registerInstallProtocolHandler,
+  registerOpenProtocolHandler,
+} from "@/protocol";
 import { enumerateVaultTree } from "@/scope";
 import {
   ackBatch,
@@ -39,8 +44,10 @@ import {
   API_VERSION,
   type IngestEvent,
   type IngestResponse,
+  type LatestPluginRelease,
   type UpsertEvent,
 } from "@/types";
+import { checkForUpdates } from "@/update";
 import { extractLinks } from "@/util";
 import { ObsidianWebSocketManager } from "@/websocket";
 
@@ -72,6 +79,11 @@ export default class MyBrainPlugin extends Plugin {
   // already enqueued — Obsidian fires `modify` for autosave even when the
   // file is byte-identical to disk.
   private readonly lastEnqueuedHashes = new Map<string, string>();
+  // Identifies this plugin install to the backend (header on every request).
+  // Self-generated per machine and kept in device-local storage — never in
+  // `data.json`, which syncs with the vault — so each machine running this
+  // vault reports its own installed version.
+  private deviceId = "";
   private draining = false;
   private tokenRejected = false;
   private unloaded = false;
@@ -91,8 +103,11 @@ export default class MyBrainPlugin extends Plugin {
   async onload() {
     await this.loadAll();
 
+    this.deviceId = getOrCreateDeviceId(this.app);
+
     this.addSettingTab(new MyBrainSettingTab(this.app, this));
     registerInstallProtocolHandler(this);
+    registerOpenProtocolHandler(this);
 
     let dirty = false;
 
@@ -125,6 +140,15 @@ export default class MyBrainPlugin extends Plugin {
       );
 
       void this.drain();
+
+      this.registerInterval(
+        globalThis.setInterval(
+          () => void checkForUpdates(this, { manual: false }),
+          UPDATE_CHECK_TICK_MS,
+        ),
+      );
+
+      void checkForUpdates(this, { manual: false });
     });
   }
 
@@ -186,6 +210,28 @@ export default class MyBrainPlugin extends Plugin {
     if (this.canSync()) {
       void this.pushManifest({ initial: true });
     }
+  }
+
+  /** Latest published plugin release from the MyBrain backend (which caches
+   * it from GitHub server-side). Null when the lookup fails or the release is
+   * unknown. The authenticated request also reports this install's version to
+   * the backend via the standard headers. */
+  async fetchLatestPluginRelease(): Promise<LatestPluginRelease | null> {
+    try {
+      return (
+        (await getJson<LatestPluginRelease | null>(
+          this.auth(),
+          "/latest-release",
+        )) ?? null
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether the plugin is configured to talk to a MyBrain endpoint. */
+  canSync(): boolean {
+    return Boolean(this.settings.token && this.settings.endpoint);
   }
 
   private doRestartWebSocket(): void {
@@ -623,11 +669,12 @@ export default class MyBrainPlugin extends Plugin {
   }
 
   private auth(): Auth {
-    return { endpoint: this.settings.endpoint, token: this.settings.token };
-  }
-
-  private canSync(): boolean {
-    return Boolean(this.settings.token && this.settings.endpoint);
+    return {
+      endpoint: this.settings.endpoint,
+      token: this.settings.token,
+      deviceId: this.deviceId,
+      pluginVersion: this.manifest.version,
+    };
   }
 
   private isInScope(path: string): boolean {

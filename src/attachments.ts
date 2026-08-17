@@ -45,11 +45,11 @@ export async function resolveAttachments(
       embed.link,
       file.path,
     );
-    
+
     if (!target || target.extension === "md") continue;
-    
+
     if (seen.has(target.path)) continue;
-    
+
     seen.add(target.path);
     files.push(target);
   }
@@ -100,7 +100,7 @@ export async function uploadAttachments(
     }
 
     const bytes = await app.vault.readBinary(task.resolved.file);
-    
+
     await postMultipart({
       auth,
       path: "/attachments",
@@ -133,10 +133,10 @@ async function mapWithConcurrency<T, R>(
   concurrency: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
-  const results: R[] = new Array(items.length);
+  const results: R[] = new Array<R>(items.length);
 
   let next = 0;
-  
+
   const worker = async () => {
     while (true) {
       const index = next++;
@@ -144,13 +144,13 @@ async function mapWithConcurrency<T, R>(
       results[index] = await fn(items[index]);
     }
   };
-  
+
   const workers = Array.from(
     { length: Math.min(concurrency, items.length) },
     worker,
   );
-  
+
   await Promise.all(workers);
-  
+
   return results;
 }
