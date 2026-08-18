@@ -71,7 +71,7 @@ type StoredData = {
 const WS_RESTART_DEBOUNCE_MS = 500;
 
 export default class MyBrainPlugin extends Plugin {
-  settings!: MyBrainSettings;
+  declare settings: MyBrainSettings;
   private queue: QueueState = emptyState();
   private readonly resolvedAttachments = new Map<string, ResolvedAttachment>();
   private readonly pendingFlushTimers = new Map<string, number>();
@@ -136,13 +136,13 @@ export default class MyBrainPlugin extends Plugin {
       }
 
       this.registerInterval(
-        globalThis.setInterval(() => void this.drain(), DRAIN_INTERVAL_MS),
+        window.setInterval(() => void this.drain(), DRAIN_INTERVAL_MS),
       );
 
       void this.drain();
 
       this.registerInterval(
-        globalThis.setInterval(
+        window.setInterval(
           () => void checkForUpdates(this, { manual: false }),
           UPDATE_CHECK_TICK_MS,
         ),
@@ -154,7 +154,7 @@ export default class MyBrainPlugin extends Plugin {
 
   onunload() {
     this.unloaded = true;
-    this.pendingFlushTimers.forEach((id) => globalThis.clearTimeout(id));
+    this.pendingFlushTimers.forEach((id) => window.clearTimeout(id));
     this.pendingFlushTimers.clear();
     this.wsManager.stop();
     // Best-effort final persistence so events queued in the last second
@@ -564,10 +564,10 @@ export default class MyBrainPlugin extends Plugin {
     const existing = this.pendingFlushTimers.get(key);
 
     if (existing) {
-      globalThis.clearTimeout(existing);
+      window.clearTimeout(existing);
     }
 
-    const timer = globalThis.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       this.pendingFlushTimers.delete(key);
       void fn();
     }, DEBOUNCE_MS);

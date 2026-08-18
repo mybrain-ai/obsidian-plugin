@@ -1,6 +1,6 @@
 {
   "name": "mybrain-obsidian",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "MyBrain — Obsidian community plugin",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "eslint": "^9.39.5",
     "eslint-plugin-obsidianmd": "^0.4.1",
     "husky": "^9.1.7",
-    "obsidian": "^1.5.7",
+    "obsidian": "^1.13.1",
     "tslib": "^2.6.3",
     "typescript": "^5.5.0"
   }

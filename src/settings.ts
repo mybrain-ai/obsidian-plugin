@@ -4,6 +4,7 @@ import {
   Notice,
   PluginSettingTab,
   Setting,
+  SettingDefinitionItem,
   TextComponent,
 } from "obsidian";
 import { UPDATE_LATEST_VERSION_KEY } from "@/constants";
@@ -37,45 +38,102 @@ export const DEFAULT_SETTINGS: MyBrainSettings = {
 
 export class MyBrainSettingTab extends PluginSettingTab {
   readonly plugin: MyBrainPlugin;
-  private unsubscribeSyncState: (() => void) | null = null;
 
   constructor(app: App, plugin: MyBrainPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
+  // The base setControlValue persists settings alone; this plugin stores them
+  // nested alongside the sync queue, so writes must go through saveSettings().
+  async setControlValue(key: string, value: unknown): Promise<void> {
+    (this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+    await this.plugin.saveSettings();
+  }
 
-    // Re-rendered on open; drop any subscription from the previous render so we
-    // don't accumulate stale listeners.
-    this.unsubscribeSyncState?.();
-    this.unsubscribeSyncState = null;
+  getSettingDefinitions(): SettingDefinitionItem<keyof MyBrainSettings>[] {
+    return [
+      {
+        name: "Bearer token",
+        desc: "Paste the token from the MyBrain Connect Obsidian page. Activates on first POST. Stored in plain text inside this vault's plugin data — avoid storing production tokens in synced or shared vaults, and rotate the token in the MyBrain web app if the vault is compromised.",
+        render: (setting) => this._renderTokenSetting(setting),
+      },
+      {
+        name: "Sync attachments on mobile",
+        desc: "Upload images and PDFs over cellular. Off by default to avoid surprise data usage.",
+        control: { type: "toggle", key: "syncAttachmentsOnMobile" },
+      },
+      {
+        name: "Test connection",
+        desc: "Hit /ping with the current token to confirm it is recognized.",
+        render: (setting) => {
+          setting.addButton((btn) =>
+            btn.setButtonText("Test").onClick(async () => {
+              const result = await this.plugin.testConnection();
+              new Notice(`MyBrain: ${result}`);
+            }),
+          );
+        },
+      },
+      {
+        name: "Sync status",
+        render: (setting) => {
+          const apply = (): void => {
+            setting.setDesc(this._syncStatusText());
+          };
 
+          apply();
+          return this.plugin.onSyncStateChange(apply);
+        },
+      },
+      {
+        name: "Resync full vault",
+        desc: "Clears the local sync watermark and re-uploads every markdown file.",
+        render: (setting) => this._renderResyncSetting(setting),
+      },
+      {
+        name: "Plugin version",
+        render: (setting) => {
+          setting.setDesc(this._versionText());
+
+          setting.addButton((btn) =>
+            btn.setButtonText("Check for updates").onClick(async () => {
+              btn.setDisabled(true);
+              btn.setButtonText("Checking…");
+
+              try {
+                await checkForUpdates(this.plugin, { manual: true });
+                setting.setDesc(this._versionText());
+              } finally {
+                btn.setDisabled(false);
+                btn.setButtonText("Check for updates");
+              }
+            }),
+          );
+        },
+      },
+    ];
+  }
+
+  private _renderTokenSetting(setting: Setting): void {
     let tokenInput!: TextComponent;
     let actions!: HTMLElement;
 
-    const tokenSetting = new Setting(containerEl)
-      .setName("Bearer token")
-      .setDesc(
-        "Paste the token from the MyBrain Connect Obsidian page. Activates on first POST. Stored in plain text inside this vault's plugin data — avoid storing production tokens in synced or shared vaults, and rotate the token in the MyBrain web app if the vault is compromised.",
-      )
-      .addText((text) => {
-        tokenInput = text;
-        text
-          .setPlaceholder("mbr_sk_live_...")
-          .setValue(this.plugin.settings.token)
-          .onChange(() => this._refreshTokenActions(tokenInput, actions));
-        text.inputEl.addClass("mybrain-token-input");
-      });
+    setting.addText((text) => {
+      tokenInput = text;
+      text
+        .setPlaceholder("mbr_sk_live_...")
+        .setValue(this.plugin.settings.token)
+        .onChange(() => this._refreshTokenActions(tokenInput, actions));
+      text.inputEl.addClass("mybrain-token-input");
+    });
 
     // Save/Cancel go inside this setting's control, on their own right-aligned
     // row below the field (the control is allowed to wrap). The row always
     // reserves its height (hidden via `visibility`), so showing it on edit
     // doesn't shift the settings below.
-    tokenSetting.controlEl.addClass("mybrain-token-control");
-    actions = tokenSetting.controlEl.createDiv({
+    setting.controlEl.addClass("mybrain-token-control");
+    actions = setting.controlEl.createDiv({
       cls: "mybrain-token-actions",
     });
 
@@ -101,111 +159,52 @@ export class MyBrainSettingTab extends PluginSettingTab {
     });
 
     this._refreshTokenActions(tokenInput, actions);
+  }
 
-    new Setting(containerEl)
-      .setName("Sync attachments on mobile")
-      .setDesc(
-        "Upload images and PDFs over cellular. Off by default to avoid surprise data usage.",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.syncAttachmentsOnMobile)
-          .onChange(async (value) => {
-            this.plugin.settings.syncAttachmentsOnMobile = value;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Test connection")
-      .setDesc("Hit /ping with the current token to confirm it is recognized.")
-      .addButton((btn) =>
-        btn.setButtonText("Test").onClick(async () => {
-          const result = await this.plugin.testConnection();
-          new Notice(`MyBrain: ${result}`);
-        }),
-      );
-
-    const syncStatus = new Setting(containerEl)
-      .setName("Sync status")
-      .setDesc(this._syncStatusText());
-
+  private _renderResyncSetting(setting: Setting): () => void {
     let resyncButton!: ButtonComponent;
 
-    new Setting(containerEl)
-      .setName("Resync full vault")
-      .setDesc(
-        "Clears the local sync watermark and re-uploads every markdown file.",
-      )
-      .addButton((btn) => {
-        resyncButton = btn;
-        btn
-          .setButtonText("Resync")
-          .setWarning()
-          .onClick(async () => {
-            const ok = await confirm(this.app, {
-              title: "MyBrain: full resync",
-              body: "This clears the sync watermark and re-uploads every markdown file in this vault. Continue?",
-              confirmText: "Resync",
-              destructive: true,
-            });
+    setting.addButton((btn) => {
+      resyncButton = btn;
+      btn.setButtonText("Resync").onClick(async () => {
+        const ok = await confirm(this.app, {
+          title: "MyBrain: full resync",
+          body: "This clears the sync watermark and re-uploads every markdown file in this vault. Continue?",
+          confirmText: "Resync",
+          destructive: true,
+        });
 
-            if (!ok) return;
+        if (!ok) return;
 
-            try {
-              this.plugin.settings.lastSyncAt = null;
+        try {
+          this.plugin.settings.lastSyncAt = null;
 
-              await this.plugin.saveSettings();
+          await this.plugin.saveSettings();
 
-              const succeeded = await this.plugin.initialScan();
+          const succeeded = await this.plugin.initialScan();
 
-              if (succeeded) new Notice("MyBrain: full resync completed");
-            } catch (e) {
-              console.error("MyBrain: resync failed", e);
-              new Notice(
-                `MyBrain: resync failed — ${e instanceof Error ? e.message : String(e)}`,
-              );
-            }
-          });
+          if (succeeded) new Notice("MyBrain: full resync completed");
+        } catch (e) {
+          console.error("MyBrain: resync failed", e);
+          new Notice(
+            `MyBrain: resync failed — ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
       });
+    });
 
-    // The Resync button and status line reflect any full sync — a deep-link or
-    // startup auto-sync, not just a manual click — so the button is disabled
-    // whenever one is running.
-    const applySyncState = (): void => {
+    // The Resync button reflects any full sync — a deep-link or startup
+    // auto-sync, not just a manual click — so it is disabled whenever one is
+    // running.
+    const apply = (): void => {
       const syncing = this.plugin.isSyncing();
 
-      syncStatus.setDesc(this._syncStatusText());
       resyncButton.setDisabled(syncing);
       resyncButton.setButtonText(syncing ? "Syncing…" : "Resync");
     };
 
-    applySyncState();
-    this.unsubscribeSyncState = this.plugin.onSyncStateChange(applySyncState);
-
-    const versionSetting = new Setting(containerEl)
-      .setName("Plugin version")
-      .setDesc(this._versionText());
-
-    versionSetting.addButton((btn) =>
-      btn.setButtonText("Check for updates").onClick(async () => {
-        btn.setDisabled(true);
-        btn.setButtonText("Checking…");
-
-        try {
-          await checkForUpdates(this.plugin, { manual: true });
-          versionSetting.setDesc(this._versionText());
-        } finally {
-          btn.setDisabled(false);
-          btn.setButtonText("Check for updates");
-        }
-      }),
-    );
-  }
-
-  hide(): void {
-    this.unsubscribeSyncState?.();
-    this.unsubscribeSyncState = null;
+    apply();
+    return this.plugin.onSyncStateChange(apply);
   }
 
   private _versionText(): string {

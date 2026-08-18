@@ -45,7 +45,7 @@ export class ObsidianWebSocketManager {
     this.stopped = true;
 
     if (this.reconnectTimer !== null) {
-      globalThis.clearTimeout(this.reconnectTimer);
+      window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
 
@@ -160,7 +160,7 @@ export class ObsidianWebSocketManager {
     });
 
     this.reconnectAttempt += 1;
-    this.reconnectTimer = globalThis.setTimeout(() => {
+    this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
     }, delay);
