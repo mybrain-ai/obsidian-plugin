@@ -2,6 +2,11 @@
 
 All notable changes to MyBrain are documented here.
 
+## 1.0.4
+
+- Renamed the plugin to **mybrain.ai** (id `mybrain-ai`) — the previous id and name are used by an unrelated plugin in the Obsidian community directory. Deep links (`obsidian://mybrain/...`) are unchanged.
+- Existing manual or BRAT installs live in `.obsidian/plugins/mybrain/` and won't pick up this release; reinstall under the new id to keep receiving updates. Plugin settings need to be re-entered (or copy `data.json` from the old folder to the new one).
+
 ## 1.0.3
 
 - Update notifications: once connected, the plugin checks for new releases once a day via your MyBrain endpoint (and on demand via a "Check for updates" button in settings) and shows a notice with the release notes and update instructions. No files are changed automatically — updating still happens through BRAT or the Obsidian community-plugin updater.

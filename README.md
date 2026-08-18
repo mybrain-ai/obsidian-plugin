@@ -6,7 +6,7 @@ Syncs your Obsidian vault to your MyBrain account so notes are searchable alongs
 
 ### Community plugins
 
-In Obsidian: **Settings → Community plugins → Browse** → search for "MyBrain" → Install → Enable.
+In Obsidian: **Settings → Community plugins → Browse** → search for "mybrain.ai" → Install → Enable.
 
 ### Via BRAT
 
@@ -14,7 +14,7 @@ Installs the latest GitHub release directly — the same version the community d
 
 1. Install the [BRAT plugin](https://github.com/TfTHacker/obsidian42-brat).
 2. In BRAT: **Add Beta plugin** → `mybrain-ai/obsidian-plugin`.
-3. Enable **MyBrain** in **Settings → Community plugins → Installed plugins**.
+3. Enable **mybrain.ai** in **Settings → Community plugins → Installed plugins**.
 
 ### Sideload (manual install / development build)
 
@@ -31,13 +31,13 @@ Use this when you're working on the plugin locally or testing an unreleased vers
    npm run build
    ```
    This produces `main.js` in the repo root; `manifest.json` and `styles.css` are already in the repo. The build bakes in the production ingest endpoint as the default — to develop against a local backend, connect through the deep link from your locally running web app, which stores the local endpoint in the plugin's settings (stored settings always beat the baked default).
-3. Find your vault's plugin directory. On macOS, Obsidian's vault registry lives at `~/Library/Application Support/obsidian/obsidian.json` (`%APPDATA%\obsidian\obsidian.json` on Windows, `~/.config/obsidian/obsidian.json` on Linux). The plugin folder inside any vault is `<vault>/.obsidian/plugins/mybrain/`.
+3. Find your vault's plugin directory. On macOS, Obsidian's vault registry lives at `~/Library/Application Support/obsidian/obsidian.json` (`%APPDATA%\obsidian\obsidian.json` on Windows, `~/.config/obsidian/obsidian.json` on Linux). The plugin folder inside any vault is `<vault>/.obsidian/plugins/mybrain-ai/`.
 4. Copy the three files into that folder, creating it if needed:
    ```bash
-   mkdir -p "<vault>/.obsidian/plugins/mybrain"
-   cp main.js manifest.json styles.css "<vault>/.obsidian/plugins/mybrain/"
+   mkdir -p "<vault>/.obsidian/plugins/mybrain-ai"
+   cp main.js manifest.json styles.css "<vault>/.obsidian/plugins/mybrain-ai/"
    ```
-5. In Obsidian: **Settings → Community plugins**. If you see "Restricted mode," turn it off first. Then click **Reload plugins** (or restart Obsidian) and toggle **MyBrain** on under Installed plugins.
+5. In Obsidian: **Settings → Community plugins**. If you see "Restricted mode," turn it off first. Then click **Reload plugins** (or restart Obsidian) and toggle **mybrain.ai** on under Installed plugins.
 6. Continue with [Configure](#configure) below.
 
 To iterate, re-run step 2 and copy the new `main.js` over; in Obsidian disable then re-enable the plugin (or use the "Hot reload" plugin) to pick up the change.
