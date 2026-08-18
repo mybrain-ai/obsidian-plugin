@@ -2,6 +2,13 @@
 
 All notable changes to MyBrain are documented here.
 
+## 1.0.5
+
+- Settings now appear in Obsidian's settings search (adopts the declarative settings API). No visible changes to the settings tab itself.
+- Release assets (`main.js`, `styles.css`) now ship with GitHub artifact attestations, so their provenance can be cryptographically verified against this repository.
+- Timers now run through the window object for popout-window compatibility, per Obsidian's plugin guidelines.
+- Now requires Obsidian 1.13.0 or newer; users on older Obsidian keep 1.0.4.
+
 ## 1.0.4
 
 - Renamed the plugin to **mybrain.ai** (id `mybrain-ai`) — the previous id and name are used by an unrelated plugin in the Obsidian community directory. Deep links (`obsidian://mybrain/...`) are unchanged.

@@ -129,7 +129,7 @@ function _openPluginSettings(plugin: MyBrainPlugin): void {
   // handler can silently no-op — especially when Obsidian was just launched
   // by the deep link — leaving the user with no visible result.
   plugin.app.workspace.onLayoutReady(() =>
-    globalThis.setTimeout(openSettings, 0),
+    window.setTimeout(openSettings, 0),
   );
 }
 
