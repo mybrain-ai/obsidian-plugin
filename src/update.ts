@@ -91,10 +91,7 @@ class UpdateModal extends Modal {
     const howTo = this.contentEl.createEl("p");
     howTo.createEl("strong", { text: "How to update: " });
     howTo.createSpan({
-      text:
-        "installed via BRAT — run the “BRAT: Check for updates” command; " +
-        "installed from the community directory — Settings → Community " +
-        "plugins → Check for updates.",
+      text: "Settings → Community plugins → Check for updates.",
     });
 
     const buttons = this.contentEl.createDiv({

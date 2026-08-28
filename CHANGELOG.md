@@ -2,6 +2,11 @@
 
 All notable changes to MyBrain are documented here.
 
+## 1.0.6
+
+- MyBrain is now listed in the [Obsidian community-plugin directory](https://community.obsidian.md/plugins/mybrain-ai) — install and update it directly from **Settings → Community plugins**, no beta-install tooling needed.
+- The update dialog and install docs now point exclusively at the community-plugin directory.
+
 ## 1.0.5
 
 - Settings now appear in Obsidian's settings search (adopts the declarative settings API). No visible changes to the settings tab itself.
