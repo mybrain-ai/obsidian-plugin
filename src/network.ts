@@ -14,6 +14,21 @@ export class TokenRejectedError extends Error {
   }
 }
 
+/** Non-2xx response other than 401. Carries the status so callers can tell a
+ * request the server refused (4xx) from one worth retrying. */
+export class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`MyBrain request failed (status ${status})`);
+    this.name = "HttpError";
+  }
+}
+
+/** The server refused the request body: a server that predates protocol 2
+ * answers a protocol 2 manifest or event batch with a validation error. */
+export function isProtocolRejection(e: unknown): boolean {
+  return e instanceof HttpError && (e.status === 400 || e.status === 422);
+}
+
 type MultipartFile = { name: string; bytes: ArrayBuffer; contentType: string };
 
 export async function postJson<T>(
@@ -80,7 +95,7 @@ function guard(response: RequestUrlResponse): void {
   }
   if (response.status < 200 || response.status >= 300) {
     console.warn(`MyBrain ${response.status}: ${response.text}`);
-    throw new Error(`MyBrain request failed (status ${response.status})`);
+    throw new HttpError(response.status);
   }
 }
 

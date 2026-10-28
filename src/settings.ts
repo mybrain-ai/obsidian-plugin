@@ -11,6 +11,7 @@ import { UPDATE_LATEST_VERSION_KEY } from "@/constants";
 import { loadDeviceValue } from "@/device";
 import type MyBrainPlugin from "@/main";
 import { confirm } from "@/ui";
+import type { ServerProtocol } from "@/types";
 import { checkForUpdates } from "@/update";
 import { compareVersions } from "@/version";
 
@@ -24,6 +25,8 @@ export interface MyBrainSettings {
   vaultName: string;
   lastSyncAt: number | null;
   syncAttachmentsOnMobile: boolean;
+  // Protocol the server accepted on the last manifest push; null until known.
+  serverProtocol: ServerProtocol | null;
 }
 
 export const DEFAULT_SETTINGS: MyBrainSettings = {
@@ -34,6 +37,7 @@ export const DEFAULT_SETTINGS: MyBrainSettings = {
   vaultName: "",
   lastSyncAt: null,
   syncAttachmentsOnMobile: false,
+  serverProtocol: null,
 };
 
 export class MyBrainSettingTab extends PluginSettingTab {
@@ -88,7 +92,7 @@ export class MyBrainSettingTab extends PluginSettingTab {
       },
       {
         name: "Resync full vault",
-        desc: "Clears the local sync watermark and re-uploads every markdown file.",
+        desc: "Clears the local sync watermark and re-sends the list of notes in the synced folders. Note text is only sent for notes you include in MyBrain.",
         render: (setting) => this._renderResyncSetting(setting),
       },
       {
@@ -169,7 +173,7 @@ export class MyBrainSettingTab extends PluginSettingTab {
       btn.setButtonText("Resync").onClick(async () => {
         const ok = await confirm(this.app, {
           title: "MyBrain: full resync",
-          body: "This clears the sync watermark and re-uploads every markdown file in this vault. Continue?",
+          body: "This clears the sync watermark and re-sends the list of notes in the synced folders to MyBrain. Continue?",
           confirmText: "Resync",
           destructive: true,
         });
