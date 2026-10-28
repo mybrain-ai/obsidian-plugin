@@ -1,0 +1,2 @@
+# Contract fixtures are compared byte for byte and copied to the backend repo.
+tests/fixtures/** text eol=lf
