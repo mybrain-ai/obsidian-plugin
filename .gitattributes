@@ -1,2 +1,2 @@
-# Contract fixtures are compared byte for byte and copied to the backend repo.
+# Contract fixtures are compared byte for byte, on every platform.
 tests/fixtures/** text eol=lf

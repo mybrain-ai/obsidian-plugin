@@ -1,5 +1,5 @@
-// The vault behind tests/fixtures/obsidian/*.json (the SPEC example, plus the
-// cases the protocol must get right: a link with a display alias (the form
+// The vault behind tests/fixtures/obsidian/*.json (a small research vault, plus
+// the cases the protocol must get right: a link with a display alias (the form
 // Obsidian autocomplete writes for an alias; a bare [[alias]] stays
 // unresolved in Obsidian too), a link to a missing note,
 // a PDF embed, a body tag next to frontmatter tags, and a property outside the

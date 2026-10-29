@@ -10,7 +10,7 @@
     "build": "node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit && tsc -p tests/tsconfig.json",
     "test": "node scripts/run-tests.mjs",
-    "lint": "eslint src",
+    "lint": "eslint src tests",
     "release": "node scripts/bump-version.mjs",
     "check:changelog": "node scripts/check-changelog.mjs",
     "prepare": "husky"

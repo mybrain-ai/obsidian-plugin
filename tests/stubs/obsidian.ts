@@ -24,8 +24,62 @@ export class Notice {
   constructor(public message: string) {}
 }
 
-export function requestUrl(): never {
-  throw new Error("requestUrl is not available in tests");
+export type FakeRequest = {
+  url: string;
+  method: string;
+  body?: string | ArrayBuffer;
+};
+
+type FakeServer = (request: FakeRequest) => { status: number; json?: unknown };
+
+let fakeServer: FakeServer | null = null;
+
+/** Answer `requestUrl` calls in the current test (null: no network). */
+export function setFakeServer(server: FakeServer | null): void {
+  fakeServer = server;
+}
+
+export async function requestUrl(request: FakeRequest) {
+  if (!fakeServer) throw new Error("requestUrl is not available in tests");
+
+  const { status, json } = fakeServer(request);
+
+  return { status, json, text: json === undefined ? "" : JSON.stringify(json) };
+}
+
+export class Plugin {
+  constructor(
+    public app: unknown,
+    public manifest: { id: string; version: string },
+  ) {}
+
+  async loadData(): Promise<unknown> {
+    return null;
+  }
+
+  async saveData(): Promise<void> {}
+}
+
+export class PluginSettingTab {
+  constructor(
+    public app: unknown,
+    public plugin: unknown,
+  ) {}
+}
+
+export class Modal {
+  constructor(public app: unknown) {}
+}
+
+// Settings UI, imported by src/settings.ts and never rendered in tests.
+export class Setting {}
+export class ButtonComponent {}
+export class TextComponent {}
+export class SettingDefinitionItem {}
+
+export function debounce<A extends unknown[]>(fn: (...args: A) => void) {
+  const debounced = (...args: A) => fn(...args);
+  return Object.assign(debounced, { cancel: () => {} });
 }
 
 // Same contract as Obsidian's: strip `#heading` / `^block` from a link.

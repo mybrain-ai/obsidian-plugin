@@ -1,4 +1,3 @@
-import { sha256 } from "@/hash";
 import type { AttachmentRef, NoteMetadata } from "@/types";
 import { uniq } from "@/util";
 
@@ -19,6 +18,8 @@ export type NoteMetadataInput = {
   basename: string;
   stat: { ctime: number; mtime: number; size: number };
   content: string;
+  // sha256 of `content`.
+  hash: string;
   frontmatter: Record<string, unknown> | undefined;
   // Offset where the frontmatter block ends, from the metadata cache. Null
   // when the note has no frontmatter.
@@ -70,9 +71,7 @@ export function normalizeTags(tags: string[] | null): string[] {
   );
 }
 
-export async function buildNoteMetadata(
-  input: NoteMetadataInput,
-): Promise<NoteMetadata> {
+export function buildNoteMetadata(input: NoteMetadataInput): NoteMetadata {
   return {
     path: input.path,
     name: input.basename,
@@ -80,7 +79,7 @@ export async function buildNoteMetadata(
     size: input.stat.size,
     ctime: input.stat.ctime,
     mtime: input.stat.mtime,
-    hash: await sha256(input.content),
+    hash: input.hash,
     words: countWords(input.content, input.frontmatterEnd),
     frontmatter: filterFrontmatter(input.frontmatter),
     tags: normalizeTags(input.tags),

@@ -25,6 +25,12 @@ type WsServerMessage =
   | { type: "scope_changed"; folders: string[] }
   | { type: "content_requested"; requestId: string; paths: string[] };
 
+export type WsClientMessage = {
+  type: "hello";
+  protocol: number;
+  pluginVersion: string;
+};
+
 const RECONNECT_DELAYS_MS = [1_000, 5_000, 15_000, 30_000, 60_000];
 
 // Close codes that mean "the server told us to stop trying": 4401 is our
@@ -65,18 +71,16 @@ export class ObsidianWebSocketManager {
     }
   }
 
-  /** Send a JSON message if the socket is open. Returns whether it was sent. */
-  send(message: Record<string, unknown>): boolean {
+  /** Send a JSON message if the socket is open. */
+  send(message: WsClientMessage): void {
     const ws = this.socket;
 
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     try {
       ws.send(JSON.stringify(message));
-      return true;
     } catch (e) {
       console.warn("MyBrain WS: send failed", e);
-      return false;
     }
   }
 
@@ -104,7 +108,12 @@ export class ObsidianWebSocketManager {
       const ws = new WebSocket(url, subprotocol);
       this.socket = ws;
 
+      // A socket replaced by a restart can still fire late events; only the
+      // current one may touch the manager's state.
+      const current = () => this.socket === ws;
+
       ws.addEventListener("open", () => {
+        if (!current()) return;
         this.reconnectAttempt = 0;
         console.debug("MyBrain WS: connected");
         try {
@@ -114,10 +123,10 @@ export class ObsidianWebSocketManager {
         }
       });
       ws.addEventListener("message", (event) => {
-        void this.handleMessage(event);
+        if (current()) void this.handleMessage(event);
       });
       ws.addEventListener("close", (event) => {
-        this.handleClose(event);
+        if (current()) this.handleClose(event);
       });
       ws.addEventListener("error", (event) => {
         console.warn("MyBrain WS: error", event);
@@ -158,7 +167,10 @@ export class ObsidianWebSocketManager {
 
     const parsed = parseServerMessage(event.data);
 
-    if (parsed === null) return;
+    if (parsed === null) {
+      console.warn("MyBrain WS: ignored a message it could not read");
+      return;
+    }
 
     if (parsed.type === "manifest_request") {
       try {
@@ -260,6 +272,8 @@ function parseContentRequested(
       paths.push((item as { path: string }).path);
     }
   }
+
+  if (paths.length === 0) return null;
 
   return { type: "content_requested", requestId, paths };
 }

@@ -11,6 +11,7 @@ All notable changes to MyBrain are documented here.
 - MyBrain can ask for a note's text over the WebSocket (`content_requested`); the plugin answers in batches of 50 on `POST /content`, never for notes outside the chosen folders. On every (re)connect the plugin says hello so requests left open while it was off are sent again.
 - Older MyBrain servers keep working: if the server doesn't accept the new protocol, the plugin falls back to the 1.0 behavior and logs it in the developer console.
 - README: describes what leaves your machine and when, and links to the privacy policy at www.mybrain.ai/privacy.
+- An embed that points at part of a file (`![[report.pdf#page=2]]`) now sends that file as an attachment too.
 
 ## 1.0.6
 

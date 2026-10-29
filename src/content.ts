@@ -1,7 +1,8 @@
 import { nextBackoffDelay } from "@/backoff";
 import { BATCH_SIZE } from "@/constants";
 import { HttpError, TokenRejectedError } from "@/network";
-import type { ContentMissing, ContentNote, ContentResponse } from "@/types";
+import type { ContentMissing, ContentNote, IngestResponse } from "@/types";
+import type { RequestEnvelope } from "@/vault-metadata";
 
 export type ContentReadResult<R> =
   | { kind: "note"; note: Omit<ContentNote, "requestId">; resolved: R[] }
@@ -11,7 +12,10 @@ export interface ContentQueueDeps<R> {
   /** Read one requested note as it is now. */
   read(path: string): Promise<ContentReadResult<R>>;
   /** `POST /content` with one batch. */
-  send(notes: ContentNote[], missing: ContentMissing[]): Promise<ContentResponse | undefined>;
+  send(
+    notes: ContentNote[],
+    missing: ContentMissing[],
+  ): Promise<IngestResponse | undefined>;
   /** Upload the attachments the server asked for after a batch. */
   uploadAttachments(hashes: string[], resolved: R[]): Promise<void>;
   onTokenRejected(): void;
@@ -19,24 +23,28 @@ export interface ContentQueueDeps<R> {
   clearTimer(id: number): void;
 }
 
+/** Body of `POST /content`. */
+export type ContentBody = RequestEnvelope & {
+  protocol: 2;
+  notes: ContentNote[];
+  missing: ContentMissing[];
+};
+
 const RETRY_DELAYS_MS = [1_000, 5_000, 30_000, 120_000];
 
-/** Body of `POST /content`. */
 export function buildContentBody(
-  envelope: { vaultId: string; vaultName: string; clientTime: string },
+  envelope: RequestEnvelope,
   notes: ContentNote[],
   missing: ContentMissing[],
-): Record<string, unknown> {
+): ContentBody {
   return { protocol: 2, ...envelope, notes, missing };
 }
 
-/** Notes the server asked for (`content_requested`), sent in batches of 50.
- * A path asked for twice is sent once, under the latest request id. After the
- * retries run out the pending paths are dropped: the server keeps every open
- * request and asks again when the plugin reconnects. */
+/** Notes the server asked for (`content_requested`), sent `BATCH_SIZE` at a
+ * time. A path asked for twice goes once, under the latest request id. */
 export class ContentRequestQueue<R> {
   private readonly pending = new Map<string, string>();
-  private running = false;
+  private current: Promise<void> | null = null;
   private attempt = 0;
   private retryTimer: number | null = null;
   private stopped = false;
@@ -57,33 +65,44 @@ export class ContentRequestQueue<R> {
     }
 
     // Start on the next microtask so requests arriving together share batches.
-    void Promise.resolve().then(() => this.run());
+    void Promise.resolve().then(() => this.runLogged());
+  }
+
+  /** Drop every queued request (the connection they came on is gone; the
+   * server asks again on the next one). */
+  clear(): void {
+    this.pending.clear();
+    this.attempt = 0;
+    this.cancelRetry();
   }
 
   stop(): void {
     this.stopped = true;
-    this.pending.clear();
-
-    if (this.retryTimer !== null) {
-      this.deps.clearTimer(this.retryTimer);
-      this.retryTimer = null;
-    }
+    this.clear();
   }
 
-  /** Resolves when the queue is empty or waiting for a retry. */
-  async run(): Promise<void> {
-    if (this.running || this.stopped || this.retryTimer !== null) return;
+  /** Send what is queued. While a run is going this returns that run. It
+   * resolves when the queue is empty or waiting for a retry. */
+  run(): Promise<void> {
+    if (this.stopped || this.retryTimer !== null) return Promise.resolve();
 
-    this.running = true;
+    this.current ??= this.drain().finally(() => {
+      this.current = null;
+    });
 
-    try {
-      while (!this.stopped && this.pending.size > 0) {
-        const batch = Array.from(this.pending.entries()).slice(0, BATCH_SIZE);
+    return this.current;
+  }
 
-        if (!(await this.sendBatch(batch))) return;
+  private async drain(): Promise<void> {
+    while (!this.stopped && this.pending.size > 0) {
+      const batch: Array<[string, string]> = [];
+
+      for (const entry of this.pending) {
+        if (batch.length === BATCH_SIZE) break;
+        batch.push(entry);
       }
-    } finally {
-      this.running = false;
+
+      if (!(await this.sendBatch(batch))) return;
     }
   }
 
@@ -91,6 +110,8 @@ export class ContentRequestQueue<R> {
     const notes: ContentNote[] = [];
     const missing: ContentMissing[] = [];
     const resolved: R[] = [];
+    const unread = new Set<string>();
+    let readError: unknown = null;
 
     for (const [path, requestId] of batch) {
       let read: ContentReadResult<R>;
@@ -98,8 +119,11 @@ export class ContentRequestQueue<R> {
       try {
         read = await this.deps.read(path);
       } catch (e) {
-        console.warn("MyBrain: failed to read a requested note", e);
-        read = { kind: "missing", reason: "not_found" };
+        // A note that exists but can't be read now stays queued: answering
+        // `not_found` would close the request on the server for good.
+        unread.add(path);
+        readError = e;
+        continue;
       }
 
       if (read.kind === "missing") {
@@ -111,10 +135,12 @@ export class ContentRequestQueue<R> {
       resolved.push(...read.resolved);
     }
 
-    let response: ContentResponse | undefined;
+    let response: IngestResponse | undefined;
 
     try {
-      response = await this.deps.send(notes, missing);
+      if (notes.length > 0 || missing.length > 0) {
+        response = await this.deps.send(notes, missing);
+      }
     } catch (e) {
       if (e instanceof TokenRejectedError) {
         this.pending.clear();
@@ -132,11 +158,12 @@ export class ContentRequestQueue<R> {
       console.warn(`MyBrain: content batch refused (status ${e.status})`);
     }
 
-    this.attempt = 0;
-
     for (const [path, requestId] of batch) {
-      // Leave the path queued if a newer request for it arrived mid-send.
-      if (this.pending.get(path) === requestId) this.pending.delete(path);
+      // Leave the path queued if it couldn't be read, or if a newer request
+      // for it arrived mid-send.
+      if (!unread.has(path) && this.pending.get(path) === requestId) {
+        this.pending.delete(path);
+      }
     }
 
     const rejected = response?.rejected.length ?? 0;
@@ -149,9 +176,22 @@ export class ContentRequestQueue<R> {
 
     if (needed.length > 0) await this.deps.uploadAttachments(needed, resolved);
 
+    if (unread.size > 0) {
+      console.warn(
+        `MyBrain: failed to read ${unread.size} requested note(s)`,
+        readError,
+      );
+      this.scheduleRetry(readError);
+      return false;
+    }
+
+    this.attempt = 0;
+
     return true;
   }
 
+  /** Retry after 1 s, 5 s, 30 s and 2 min, then drop what is queued: the
+   * server keeps every open request and asks again on the next reconnect. */
   private scheduleRetry(error: unknown): void {
     if (this.attempt >= RETRY_DELAYS_MS.length) {
       console.warn(
@@ -163,14 +203,27 @@ export class ContentRequestQueue<R> {
       return;
     }
 
-    const delay = nextBackoffDelay(this.attempt, RETRY_DELAYS_MS, {
-      jitter: true,
-    });
+    const delay = nextBackoffDelay(this.attempt, RETRY_DELAYS_MS);
 
     this.attempt += 1;
     this.retryTimer = this.deps.setTimer(() => {
       this.retryTimer = null;
-      void this.run();
+      void this.runLogged();
     }, delay);
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer === null) return;
+
+    this.deps.clearTimer(this.retryTimer);
+    this.retryTimer = null;
+  }
+
+  private async runLogged(): Promise<void> {
+    try {
+      await this.run();
+    } catch (e) {
+      console.warn("MyBrain: sending requested notes failed", e);
+    }
   }
 }

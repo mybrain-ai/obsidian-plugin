@@ -14,16 +14,19 @@ const UNKNOWN: NativeNoteSettings = {
   dailyNotesFormat: null,
 };
 
-/** Folders and format of the core Templates and Daily notes plugins. Obsidian
- * has no public API for another plugin's settings, so this reads the JSON
- * files the core plugins keep in the config folder (`core-plugins.json`,
- * `templates.json`, `daily-notes.json`) through the vault adapter. Anything
- * missing or unreadable comes back as `null`; it never throws. */
+/** Core Templates and Daily notes settings, read from their JSON files in the
+ * config folder (there is no public API for them). Never throws. */
 export async function readNativeNoteSettings(
   reader: ConfigReader,
   configDir: string,
 ): Promise<NativeNoteSettings> {
-  const corePlugins = await readJson(reader, `${configDir}/core-plugins.json`);
+  const corePluginsPath = `${configDir}/core-plugins.json`;
+
+  // No file yet means Obsidian's defaults (an empty map); a file that can't
+  // be read means unknown.
+  const corePlugins = (await exists(reader, corePluginsPath))
+    ? await readJson(reader, corePluginsPath)
+    : {};
 
   if (corePlugins === null) return { ...UNKNOWN };
 
@@ -48,15 +51,24 @@ export async function readNativeNoteSettings(
 }
 
 // `core-plugins.json` was an array of enabled ids up to Obsidian 1.4 and is a
-// map of id -> enabled since then.
+// map of id -> enabled since then. Templates and Daily notes are on by default
+// (`defaultOn` in Obsidian), so a map without their entry means on.
 function isCorePluginEnabled(corePlugins: unknown, id: string): boolean {
   if (Array.isArray(corePlugins)) return corePlugins.includes(id);
 
   if (corePlugins && typeof corePlugins === "object") {
-    return (corePlugins as Record<string, unknown>)[id] === true;
+    return (corePlugins as Record<string, unknown>)[id] !== false;
   }
 
   return false;
+}
+
+async function exists(reader: ConfigReader, path: string): Promise<boolean> {
+  try {
+    return await reader.exists(path);
+  } catch {
+    return false;
+  }
 }
 
 async function readJson(reader: ConfigReader, path: string): Promise<unknown> {

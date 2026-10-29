@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readNativeNoteSettings } from "@/native-settings";
+import { createVault } from "./vault";
 
-function reader(files: Record<string, string>) {
-  return {
-    exists: async (p: string) => p in files,
-    read: async (p: string) => files[p],
-  };
-}
+const reader = (config: Record<string, string>) =>
+  createVault({ notes: [], config }).app.vault.adapter;
 
 test("map format (Obsidian 1.4+), both plugins on", async () => {
   const out = await readNativeNoteSettings(
@@ -55,6 +52,35 @@ test("plugins off send null even when their settings files exist", async () => {
     templatesFolder: null,
     dailyNotesFolder: null,
     dailyNotesFormat: null,
+  });
+});
+
+test("no core-plugins.json: Templates and Daily notes are on by default", async () => {
+  const out = await readNativeNoteSettings(
+    reader({ ".obsidian/daily-notes.json": '{"folder": "Diário"}' }),
+    ".obsidian",
+  );
+
+  assert.deepEqual(out, {
+    templatesFolder: null,
+    dailyNotesFolder: "Diário",
+    dailyNotesFormat: "YYYY-MM-DD",
+  });
+});
+
+test("map format without an entry for the plugin: its default (on)", async () => {
+  const out = await readNativeNoteSettings(
+    reader({
+      ".obsidian/core-plugins.json": '{"file-explorer": true}',
+      ".obsidian/templates.json": '{"folder": "Modelos"}',
+    }),
+    ".obsidian",
+  );
+
+  assert.deepEqual(out, {
+    templatesFolder: "Modelos",
+    dailyNotesFolder: "",
+    dailyNotesFormat: "YYYY-MM-DD",
   });
 });
 

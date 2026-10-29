@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
+import process from "node:process";
 import { test } from "node:test";
 import { collectManifestV2 } from "@/vault-metadata";
 import {
@@ -11,6 +12,7 @@ import {
   TEMPLATE,
   VAULT_ENVELOPE,
 } from "./fixture-vault";
+import { createVault } from "./vault";
 
 const FIXTURE = "tests/fixtures/obsidian/manifest_v2.json";
 
@@ -87,4 +89,66 @@ test("templates and daily notes settings come from the core plugins", async () =
   assert.equal(body.templatesFolder, "Templates");
   assert.equal(body.dailyNotesFolder, "Diário");
   assert.equal(body.dailyNotesFormat, "YYYY-MM-DD");
+});
+
+test("an embed of the note's own section (![[#heading]]) is not an embed of another file", async () => {
+  const vault = createVault({
+    notes: [
+      {
+        path: "Notes/Long.md",
+        content: "# Part\n\n![[#Part]]\n",
+        ctime: 1,
+        mtime: 2,
+        embeds: ["#Part"],
+      },
+    ],
+  });
+  const cache = vault.app.metadataCache;
+  // Worst case: an empty link path resolving to the note it is written in.
+  cache.getFirstLinkpathDest = (linkpath, source) =>
+    linkpath === "" ? vault.file(source) : null;
+
+  const body = await collectManifestV2(
+    vault.app,
+    [vault.file("Notes/Long.md")],
+    VAULT_ENVELOPE,
+  );
+
+  assert.deepEqual(body.files[0].embeds, []);
+  assert.deepEqual(body.files[0].attachments, []);
+});
+
+test("an embed with a subpath (#page, #heading) still lists its attachment", async () => {
+  const vault = createVault({
+    notes: [
+      {
+        path: "Notes/Report.md",
+        content: "See ![[slides.pdf#page=2]]\n",
+        ctime: 1,
+        mtime: 2,
+        embeds: ["slides.pdf#page=2"],
+      },
+    ],
+    binaries: [
+      {
+        path: "Files/slides.pdf",
+        bytes: new Uint8Array([1, 2, 3]),
+        ctime: 1,
+        mtime: 2,
+      },
+    ],
+  });
+
+  const body = await collectManifestV2(
+    vault.app,
+    [vault.file("Notes/Report.md")],
+    VAULT_ENVELOPE,
+  );
+  const [note] = body.files;
+
+  assert.deepEqual(note.embeds, ["Files/slides.pdf"]);
+  assert.deepEqual(
+    note.attachments.map((a) => a.path),
+    ["Files/slides.pdf"],
+  );
 });
