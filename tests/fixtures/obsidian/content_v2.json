@@ -1,0 +1,30 @@
+{
+  "protocol": 2,
+  "vaultId": "11111111-2222-4333-8444-555555555555",
+  "vaultName": "Test vault",
+  "clientTime": "2026-10-28T15:00:00.000Z",
+  "notes": [
+    {
+      "requestId": "6f1c2b9e-0d4a-4c1e-9a57-2b8e3f0c1d22",
+      "path": "02 Áreas/Pesquisa/MOC Pesquisa.md",
+      "hash": "02e72dd3591e2e1ea3d65d9bf54fed26d3ac01b38724469363930b06616bb9ca",
+      "content": "---\ntags: [pesquisa]\naliases: [Pesquisa MOC]\ncreated: 2026-03-02\ndiagnostico: confidencial\n---\n# MOC Pesquisa\n\nMapa da pesquisa de método. Ver [[Diary study - roteiro|Diary study]] e [[Entrevista 12]].\n\n#pesquisa/metodo\n\n![[relatorio-atlas-2025.pdf]]\n",
+      "attachments": [
+        {
+          "path": "Anexos/relatorio-atlas-2025.pdf",
+          "ext": "pdf",
+          "size": 16,
+          "mtime": 1761000000000,
+          "hash": "326f08384935076431efafc84c9ee42b1a4b7b706671956f780d39ceb83e0116"
+        }
+      ]
+    }
+  ],
+  "missing": [
+    {
+      "requestId": "6f1c2b9e-0d4a-4c1e-9a57-2b8e3f0c1d22",
+      "path": "Diário/2026-10-28.md",
+      "reason": "not_found"
+    }
+  ]
+}

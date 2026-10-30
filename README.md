@@ -8,8 +8,8 @@ This official plugin, maintained by the [mybrain.ai](https://mybrain.ai) team, c
 
 ## Features
 
-- **Automatic, continuous sync** — after the first full-vault sync, new notes, edits, renames, and deletes flow to MyBrain as you work. No manual exports.
-- **You decide what syncs** — choose which vault folders sync, then decide which notes become sources in MyBrain. Until you choose folders, the whole vault is in scope, so the first sync sends the text of every note. See [Choosing which notes become sources](#choosing-which-notes-become-sources).
+- **Automatic, continuous sync** — after the first sync, new notes, edits, renames, and deletes flow to MyBrain as you work. No manual exports.
+- **Metadata first, text only when you include a note** — the plugin sends MyBrain the list of notes in the folders you choose (names, links, tags, word counts, and a few properties), so MyBrain can suggest which notes to bring in. The text of a note leaves your machine only after you include that note in MyBrain. See [What leaves your machine, and when](#what-leaves-your-machine-and-when).
 - **Notes become queryable knowledge** — synced notes join your other sources in MyBrain's search, chat, and knowledge graph, so you can query, combine, and reuse what you already know.
 - **Works on mobile** — runs on Obsidian Mobile, with attachment uploads off by default to protect cellular data.
 - **Update notices, never auto-updates** — the plugin tells you when a new version exists but never changes files itself.
@@ -26,15 +26,18 @@ The plugin's directory listing is at [community.obsidian.md/plugins/mybrain-ai](
 1. In the MyBrain web app, open the connectors page and connect **Obsidian**. A dialog appears with an **Open in Obsidian** button and, as a manual fallback, a bearer token (shown only once) with a **Copy** button.
 2. Click **Open in Obsidian** — a confirmation inside Obsidian shows exactly which settings will change (token masked) before anything is written. Or paste the token manually into the **Bearer token** field in the plugin's settings tab.
 3. Click **Test connection**.
-4. Click **Resync full vault** to send your existing notes. New edits sync automatically.
+4. The plugin sends the list of your notes right away. You can send it again any time with **Resync full vault**. New edits sync automatically.
 
-## Choosing which notes become sources
+## What leaves your machine, and when
 
-Receiving notes is not the same as using them. Here is what happens after you connect:
+Starting with version 1.1, the plugin works in two steps:
 
-- **Sync scope**: in the web app, choose which vault folders sync. The plugin sends the notes in those folders, including their full text. Until you choose, the scope is the whole vault, so the first sync sends every note in it. Your choice is pushed to the plugin over the WebSocket and applied right away; from then on, notes in folders outside the scope are not sent.
-- **Suggestions**: MyBrain reads the text of the synced notes and suggests which ones should become sources.
-- **You decide**: you include or decline each suggestion. Included notes are used in search, chat, and the knowledge graph. An upcoming MyBrain update deletes the stored text of the notes you decline.
+1. **The list of notes (metadata).** For every note in the folders you chose: its path and name, size, creation and modification times, a content hash, a word count, its tags, the notes it links to, the attachments it embeds, and only these properties: `tags`, `aliases`, `created`, `updated`, `date`, `source`, `url`. Any other property (for example a `diagnosis:` field) is left out of this list. The plugin also sends the folder tree and, when the core Templates and Daily notes plugins are on, their folders and date format, so MyBrain can tell templates and daily notes apart. The text of the notes is not sent.
+2. **The text, only for notes you include.** When you include a note in MyBrain (one at a time, in bulk, or by approving a group), MyBrain asks the plugin for that note, and only then does the plugin send its full text, properties block included, plus the attachments it embeds. Notes you never include never have their text sent.
+
+Choose folders in the MyBrain web app. The choice is pushed to the plugin and applied immediately, and nothing from folders outside it is sent. Until you choose, the list covers the whole vault.
+
+If your MyBrain account is still on a server version that doesn't support this, the plugin falls back to the 1.0 behavior (it sends the text of every note in the chosen folders) and notes that in the developer console, so syncing never stops.
 
 ## Skip rules
 
@@ -56,15 +59,16 @@ The plugin connects only to MyBrain's ingest endpoint. All traffic is over HTTPS
 
 ### HTTP endpoints
 
-- **`POST /manifest`** — the full vault listing: for every markdown file, the relative path, basename, content, frontmatter, modification time, size, and SHA-256 content hash. Sent on first connect (initial vault scan) and whenever the server asks for a refresh via the WebSocket below.
-- **`POST /ingest`** — incremental vault deltas. For each changed file: the same fields as `/manifest`, plus extracted wikilink and standard-markdown-link targets, plus references (hash + path) to any non-markdown files the note embeds. Triggered (with a short debounce) by Obsidian's `create`/`modify`/`delete`/`rename` vault events.
-- **`POST /attachments`** — binary contents of attachment files referenced by `![[file.ext]]` or `![alt](path)` in notes. Only sent when the server reports it doesn't already have a copy (content-hash deduplication).
+- **`POST /manifest`** — the list of notes in the chosen folders, with the metadata described in [What leaves your machine, and when](#what-leaves-your-machine-and-when), plus the folder tree. No note text. Sent on first connect, when the folder choice changes, when you click **Resync full vault**, and whenever the server asks for a refresh via the WebSocket below.
+- **`POST /ingest`** — incremental vault changes, triggered (with a short debounce) by Obsidian's `create`/`modify`/`delete`/`rename` vault events. For a new or edited note: the same metadata as `/manifest`, no text. For a delete or rename: the path(s).
+- **`POST /content`** — the text of the notes MyBrain asked for, in batches of up to 50, each with its content hash. Only notes inside the chosen folders are ever sent; a requested note that was deleted or is outside the chosen folders is reported back as missing, without text.
+- **`POST /attachments`** — binary contents of attachment files embedded (`![[file.ext]]` or `![alt](path)`) in a note whose text was sent. Only sent when the server reports it doesn't already have a copy (content-hash deduplication).
 - **`GET /ping`** — health check, sent when you click **Test connection** in plugin settings.
 - **`GET /latest-release`** — the latest published plugin version and its release notes, used for [update notifications](#update-notifications). At most once a day, plus when you click **Check for updates**. MyBrain's servers source this from the plugin's GitHub releases — your machine never contacts GitHub.
 
 ### WebSocket
 
-- **`wss://…/ws`** — a long-lived WebSocket the plugin opens after authenticating and keeps connected for the lifetime of the session. It auto-reconnects with exponential backoff and jitter if the connection drops. Its purpose is to let the server push messages at any time: a `manifest_request` prompts the plugin to re-send `POST /manifest` (e.g. after a server-side index rebuild), and a sync-scope update changes which folders sync (see above). The connection authenticates by passing the bearer token as the `bearer.<token>` WebSocket subprotocol.
+- **`wss://…/ws`** — a long-lived WebSocket the plugin opens after authenticating and keeps connected for the lifetime of the session. It auto-reconnects with exponential backoff and jitter if the connection drops. Its purpose is to let the server push messages at any time: a `manifest_request` prompts the plugin to re-send `POST /manifest` (e.g. after a server-side index rebuild), a sync-scope update changes which folders sync (see above), and a `content_requested` lists the notes you included, whose text the plugin then sends on `POST /content`. Each time it connects, the plugin sends one `hello` message with its protocol and version, so the server can re-send any request that was still open while the plugin was off. The connection authenticates by passing the bearer token as the `bearer.<token>` WebSocket subprotocol.
 
 ### Version reporting
 
@@ -72,7 +76,7 @@ Every request to your MyBrain endpoint carries two extra headers: `X-MyBrain-Plu
 
 ## Privacy
 
-Your data goes only between your Obsidian vault and MyBrain's ingest endpoint. The plugin sends the text of the notes in your sync scope (the whole vault until you choose folders), as described under [Choosing which notes become sources](#choosing-which-notes-become-sources). The per-install id and plugin version described under [Version reporting](#version-reporting) are handled per the [MyBrain privacy policy](https://www.mybrain.ai/privacy). The bearer token is stored in plain text inside this vault's plugin data; avoid storing production tokens in synced or shared vaults, and rotate the token in the MyBrain web app if the vault is compromised. The plugin's source code is open at [github.com/mybrain-ai/obsidian-plugin](https://github.com/mybrain-ai/obsidian-plugin) for inspection.
+Your data goes only between your Obsidian vault and MyBrain's ingest endpoint. What the plugin sends, and when, is described under [What leaves your machine, and when](#what-leaves-your-machine-and-when). The per-install id and plugin version described under [Version reporting](#version-reporting) are handled per the [MyBrain privacy policy](https://www.mybrain.ai/privacy). The bearer token is stored in plain text inside this vault's plugin data; avoid storing production tokens in synced or shared vaults, and rotate the token in the MyBrain web app if the vault is compromised. The plugin's source code is open at [github.com/mybrain-ai/obsidian-plugin](https://github.com/mybrain-ai/obsidian-plugin) for inspection.
 
 ## Development
 

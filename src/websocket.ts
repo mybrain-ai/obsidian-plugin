@@ -7,6 +7,8 @@ import { toWsUrl } from "@/url";
 type ManifestRequestHandler = () => Promise<void> | void;
 type ScopeChangedHandler = (folders: string[]) => Promise<void> | void;
 type TokenRejectedHandler = () => void;
+type ContentRequestedHandler = (requestId: string, paths: string[]) => void;
+type OpenHandler = () => void;
 
 interface ManagerOptions {
   endpoint: string;
@@ -14,10 +16,14 @@ interface ManagerOptions {
   onManifestRequest: ManifestRequestHandler;
   onScopeChanged: ScopeChangedHandler;
   onTokenRejected: TokenRejectedHandler;
+  onContentRequested: ContentRequestedHandler;
+  onOpen: OpenHandler;
 }
 
 type WsServerMessage =
-  { type: "manifest_request" } | { type: "scope_changed"; folders: string[] };
+  | { type: "manifest_request" }
+  | { type: "scope_changed"; folders: string[] }
+  | { type: "content_requested"; requestId: string; paths: string[] };
 
 const RECONNECT_DELAYS_MS = [1_000, 5_000, 15_000, 30_000, 60_000];
 
@@ -59,6 +65,21 @@ export class ObsidianWebSocketManager {
     }
   }
 
+  /** Send a JSON message if the socket is open. Returns whether it was sent. */
+  send(message: Record<string, unknown>): boolean {
+    const ws = this.socket;
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+
+    try {
+      ws.send(JSON.stringify(message));
+      return true;
+    } catch (e) {
+      console.warn("MyBrain WS: send failed", e);
+      return false;
+    }
+  }
+
   private connect(): void {
     const opts = this.options;
 
@@ -86,6 +107,11 @@ export class ObsidianWebSocketManager {
       ws.addEventListener("open", () => {
         this.reconnectAttempt = 0;
         console.debug("MyBrain WS: connected");
+        try {
+          this.options?.onOpen();
+        } catch (e) {
+          console.warn("MyBrain WS: open handler failed", e);
+        }
       });
       ws.addEventListener("message", (event) => {
         void this.handleMessage(event);
@@ -149,6 +175,13 @@ export class ObsidianWebSocketManager {
       } catch (e) {
         console.warn("MyBrain WS: scope_changed handler failed", e);
       }
+      return;
+    }
+
+    try {
+      this.options.onContentRequested(parsed.requestId, parsed.paths);
+    } catch (e) {
+      console.warn("MyBrain WS: content_requested handler failed", e);
     }
   }
 
@@ -167,7 +200,7 @@ export class ObsidianWebSocketManager {
   }
 }
 
-function parseServerMessage(data: unknown): WsServerMessage | null {
+export function parseServerMessage(data: unknown): WsServerMessage | null {
   if (typeof data !== "string") return null;
 
   let parsed: unknown;
@@ -195,7 +228,40 @@ function parseServerMessage(data: unknown): WsServerMessage | null {
     return { type: "scope_changed", folders: parsed.folders };
   }
 
+  if (parsed.type === "content_requested") {
+    return parseContentRequested(parsed);
+  }
+
   return null;
+}
+
+// `{type: "content_requested", request_id, paths}`. `paths` items may also be
+// `{path}` objects, so the server can add fields (e.g. the expected hash)
+// without breaking this plugin.
+function parseContentRequested(
+  message: Record<string, unknown>,
+): WsServerMessage | null {
+  const requestId = message.request_id ?? message.requestId;
+
+  if (typeof requestId !== "string" || requestId === "") return null;
+
+  if (!Array.isArray(message.paths)) return null;
+
+  const paths: string[] = [];
+
+  for (const item of message.paths as unknown[]) {
+    if (typeof item === "string") {
+      paths.push(item);
+    } else if (
+      item &&
+      typeof item === "object" &&
+      typeof (item as { path?: unknown }).path === "string"
+    ) {
+      paths.push((item as { path: string }).path);
+    }
+  }
+
+  return { type: "content_requested", requestId, paths };
 }
 
 function isHttpTokenChars(value: string): boolean {

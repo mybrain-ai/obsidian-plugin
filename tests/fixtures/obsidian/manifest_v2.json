@@ -1,0 +1,134 @@
+{
+  "protocol": 2,
+  "apiVersion": 1,
+  "vaultId": "11111111-2222-4333-8444-555555555555",
+  "vaultName": "Test vault",
+  "clientTime": "2026-10-28T15:00:00.000Z",
+  "pluginVersion": "1.1.0",
+  "templatesFolder": "Templates",
+  "dailyNotesFolder": "Diário",
+  "dailyNotesFormat": "YYYY-MM-DD",
+  "folders": [
+    {
+      "path": "02 Áreas",
+      "name": "02 Áreas",
+      "parent": null
+    },
+    {
+      "path": "02 Áreas/Pesquisa",
+      "name": "Pesquisa",
+      "parent": "02 Áreas"
+    },
+    {
+      "path": "Diário",
+      "name": "Diário",
+      "parent": null
+    },
+    {
+      "path": "Templates",
+      "name": "Templates",
+      "parent": null
+    },
+    {
+      "path": "Anexos",
+      "name": "Anexos",
+      "parent": null
+    }
+  ],
+  "files": [
+    {
+      "path": "02 Áreas/Pesquisa/MOC Pesquisa.md",
+      "name": "MOC Pesquisa",
+      "ext": "md",
+      "size": 252,
+      "ctime": 1761000000000,
+      "mtime": 1761600000000,
+      "hash": "02e72dd3591e2e1ea3d65d9bf54fed26d3ac01b38724469363930b06616bb9ca",
+      "words": 17,
+      "frontmatter": {
+        "tags": [
+          "pesquisa"
+        ],
+        "aliases": [
+          "Pesquisa MOC"
+        ],
+        "created": "2026-03-02"
+      },
+      "tags": [
+        "pesquisa",
+        "pesquisa/metodo"
+      ],
+      "links": [
+        "02 Áreas/Pesquisa/Diary study - roteiro.md",
+        "Anexos/relatorio-atlas-2025.pdf"
+      ],
+      "unresolved": [
+        "Entrevista 12"
+      ],
+      "embeds": [
+        "Anexos/relatorio-atlas-2025.pdf"
+      ],
+      "attachments": [
+        {
+          "path": "Anexos/relatorio-atlas-2025.pdf",
+          "ext": "pdf",
+          "size": 16,
+          "mtime": 1761000000000,
+          "hash": "326f08384935076431efafc84c9ee42b1a4b7b706671956f780d39ceb83e0116"
+        }
+      ]
+    },
+    {
+      "path": "02 Áreas/Pesquisa/Diary study - roteiro.md",
+      "name": "Diary study - roteiro",
+      "ext": "md",
+      "size": 83,
+      "ctime": 1761000000000,
+      "mtime": 1761100000000,
+      "hash": "bbc6b46425da3fcf2dac54e4f416a2b082823e4670f15cbae6e9442200f9ce12",
+      "words": 8,
+      "frontmatter": {
+        "aliases": [
+          "Diary study"
+        ]
+      },
+      "tags": [],
+      "links": [],
+      "unresolved": [],
+      "embeds": [],
+      "attachments": []
+    },
+    {
+      "path": "Diário/2026-10-28.md",
+      "name": "2026-10-28",
+      "ext": "md",
+      "size": 29,
+      "ctime": 1761650000000,
+      "mtime": 1761650000000,
+      "hash": "28104365ea68ad6a07c227c74a219f567c45e6a22203be463290ca07c3c16e20",
+      "words": 5,
+      "frontmatter": null,
+      "tags": [],
+      "links": [],
+      "unresolved": [],
+      "embeds": [],
+      "attachments": []
+    },
+    {
+      "path": "Templates/Reunião.md",
+      "name": "Reunião",
+      "ext": "md",
+      "size": 21,
+      "ctime": 1760000000000,
+      "mtime": 1760000000000,
+      "hash": "675d57e4596f78e5ab5285f048acecbb8ffa2e6f9e3ac69a0976d4723e0c6acd",
+      "words": 2,
+      "frontmatter": null,
+      "tags": [],
+      "links": [],
+      "unresolved": [],
+      "embeds": [],
+      "attachments": []
+    }
+  ]
+}
