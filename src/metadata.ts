@@ -2,7 +2,8 @@ import type { AttachmentRef, NoteMetadata } from "@/types";
 import { uniq } from "@/util";
 
 /** Frontmatter keys that may leave the machine. Any other property stays in
- * the vault: a property can be personal data too (e.g. `diagnosis:`). */
+ * the vault: a property can be personal data too (e.g. `diagnosis:`).
+ * `private` and `kanban-plugin` are here because MyBrain's triage reads them. */
 export const ALLOWED_FRONTMATTER_KEYS: readonly string[] = [
   "tags",
   "aliases",
@@ -11,6 +12,8 @@ export const ALLOWED_FRONTMATTER_KEYS: readonly string[] = [
   "date",
   "source",
   "url",
+  "private",
+  "kanban-plugin",
 ];
 
 export type NoteMetadataInput = {
@@ -51,8 +54,12 @@ export function filterFrontmatter(
 /** Words in the note body, frontmatter excluded: a whitespace-separated token
  * counts when it has at least one letter or digit, so markdown punctuation
  * (`-`, `>`, `|`, `---`) doesn't. */
-export function countWords(content: string, frontmatterEnd: number | null): number {
-  const body = frontmatterEnd === null ? content : content.slice(frontmatterEnd);
+export function countWords(
+  content: string,
+  frontmatterEnd: number | null,
+): number {
+  const body =
+    frontmatterEnd === null ? content : content.slice(frontmatterEnd);
 
   let words = 0;
 

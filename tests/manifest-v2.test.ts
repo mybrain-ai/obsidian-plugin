@@ -7,8 +7,10 @@ import {
   createFixtureVault,
   DAILY,
   DIARY,
+  KANBAN,
   MOC,
   PDF,
+  PRIVATE,
   TEMPLATE,
   VAULT_ENVELOPE,
 } from "./fixture-vault";
@@ -18,7 +20,9 @@ const FIXTURE = "tests/fixtures/obsidian/manifest_v2.json";
 
 async function fixtureManifest() {
   const vault = createFixtureVault();
-  const files = [MOC, DIARY, DAILY, TEMPLATE].map((p) => vault.file(p));
+  const files = [MOC, DIARY, DAILY, TEMPLATE, PRIVATE, KANBAN].map((p) =>
+    vault.file(p),
+  );
   return await collectManifestV2(vault.app, files, VAULT_ENVELOPE);
 }
 
@@ -71,6 +75,15 @@ test("only allowed frontmatter keys leave the vault", async () => {
   });
   assert.equal(JSON.stringify(body).includes("diagnostico"), false);
   assert.equal(JSON.stringify(body).includes("confidencial"), false);
+});
+
+test("the properties the server's triage reads (private, kanban-plugin) leave the vault", async () => {
+  const body = await fixtureManifest();
+  const privateNote = body.files.find((f) => f.path === PRIVATE);
+  const board = body.files.find((f) => f.path === KANBAN);
+
+  assert.deepEqual(privateNote?.frontmatter, { private: true });
+  assert.deepEqual(board?.frontmatter, { "kanban-plugin": "basic" });
 });
 
 test("words exclude the frontmatter; notes without allowed keys send null", async () => {
