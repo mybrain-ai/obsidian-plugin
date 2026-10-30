@@ -9,7 +9,7 @@ This official plugin, maintained by the [mybrain.ai](https://mybrain.ai) team, c
 ## Features
 
 - **Automatic, continuous sync** — after the first full-vault sync, new notes, edits, renames, and deletes flow to MyBrain as you work. No manual exports.
-- **You decide what syncs** — choose which vault folders sync at all, then pick per note which ones MyBrain actually uses. Folders outside the scope never leave your machine.
+- **You decide what syncs** — choose which vault folders sync, then decide which notes become sources in MyBrain. Until you choose folders, the whole vault is in scope, so the first sync sends the text of every note. See [Choosing which notes become sources](#choosing-which-notes-become-sources).
 - **Notes become queryable knowledge** — synced notes join your other sources in MyBrain's search, chat, and knowledge graph, so you can query, combine, and reuse what you already know.
 - **Works on mobile** — runs on Obsidian Mobile, with attachment uploads off by default to protect cellular data.
 - **Update notices, never auto-updates** — the plugin tells you when a new version exists but never changes files itself.
@@ -28,12 +28,13 @@ The plugin's directory listing is at [community.obsidian.md/plugins/mybrain-ai](
 3. Click **Test connection**.
 4. Click **Resync full vault** to send your existing notes. New edits sync automatically.
 
-## Selecting which notes are active in MyBrain
+## Choosing which notes become sources
 
-Receiving notes is not the same as using them. After the plugin syncs your vault, the MyBrain web app gives you two levels of control:
+Receiving notes is not the same as using them. Here is what happens after you connect:
 
-- **Sync scope** — in the web app, choose which vault folders sync at all. The choice is pushed to the plugin over the WebSocket and applied immediately; folders outside the scope are never sent from your machine.
-- **Per-file selector** — of the notes that did sync, pick which ones are actually used in search / chat / the knowledge graph. Unselected notes stay in your account (so toggling them back on is instant) but are excluded from anything MyBrain reasons over.
+- **Sync scope**: in the web app, choose which vault folders sync. The plugin sends the notes in those folders, including their full text. Until you choose, the scope is the whole vault, so the first sync sends every note in it. Your choice is pushed to the plugin over the WebSocket and applied right away; from then on, notes in folders outside the scope are not sent.
+- **Suggestions**: MyBrain reads the text of the synced notes and suggests which ones should become sources.
+- **You decide**: you include or decline each suggestion. Included notes are used in search, chat, and the knowledge graph. An upcoming MyBrain update deletes the stored text of the notes you decline.
 
 ## Skip rules
 
@@ -67,11 +68,11 @@ The plugin connects only to MyBrain's ingest endpoint. All traffic is over HTTPS
 
 ### Version reporting
 
-Every request to your MyBrain endpoint carries two extra headers: `X-MyBrain-Plugin-Version` (the installed plugin version) and `X-MyBrain-Device-Id` (a random UUID generated per install and kept in device-local storage — it never syncs with your vault and never leaves your MyBrain endpoint). MyBrain uses them to show an update notice for your connected vault in the web app. How this data is handled is covered by the [MyBrain privacy policy](https://app.mybrain.ai/privacy).
+Every request to your MyBrain endpoint carries two extra headers: `X-MyBrain-Plugin-Version` (the installed plugin version) and `X-MyBrain-Device-Id` (a random UUID generated per install and kept in device-local storage — it never syncs with your vault and never leaves your MyBrain endpoint). MyBrain uses them to show an update notice for your connected vault in the web app. How this data is handled is covered by the [MyBrain privacy policy](https://www.mybrain.ai/privacy).
 
 ## Privacy
 
-Your data goes only between your Obsidian vault and MyBrain's ingest endpoint. The per-install id and plugin version described under [Version reporting](#version-reporting) are handled per the [MyBrain privacy policy](https://app.mybrain.ai/privacy). The bearer token is stored in plain text inside this vault's plugin data; avoid storing production tokens in synced or shared vaults, and rotate the token in the MyBrain web app if the vault is compromised. The plugin's source code is open at [github.com/mybrain-ai/obsidian-plugin](https://github.com/mybrain-ai/obsidian-plugin) for inspection.
+Your data goes only between your Obsidian vault and MyBrain's ingest endpoint. The plugin sends the text of the notes in your sync scope (the whole vault until you choose folders), as described under [Choosing which notes become sources](#choosing-which-notes-become-sources). The per-install id and plugin version described under [Version reporting](#version-reporting) are handled per the [MyBrain privacy policy](https://www.mybrain.ai/privacy). The bearer token is stored in plain text inside this vault's plugin data; avoid storing production tokens in synced or shared vaults, and rotate the token in the MyBrain web app if the vault is compromised. The plugin's source code is open at [github.com/mybrain-ai/obsidian-plugin](https://github.com/mybrain-ai/obsidian-plugin) for inspection.
 
 ## Development
 
