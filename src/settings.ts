@@ -92,7 +92,7 @@ export class MyBrainSettingTab extends PluginSettingTab {
       },
       {
         name: "Resync full vault",
-        desc: "Clears the local sync watermark and re-sends the list of notes in the synced folders. Note text is only sent for notes you include in MyBrain.",
+        desc: "Clears the local sync watermark and re-sends the list of notes in the synced folders. Note text is only sent for notes you include in MyBrain, unless the server is too old for that (then every note's text is sent, as in 1.0).",
         render: (setting) => this._renderResyncSetting(setting),
       },
       {

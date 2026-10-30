@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
+import process from "node:process";
 import { test } from "node:test";
-import type { TFile } from "obsidian";
 import type { ResolvedAttachment } from "@/attachments";
 import {
   buildContentBody,
@@ -10,9 +10,9 @@ import {
   type ContentQueueDeps,
   type ContentReadResult,
 } from "@/content";
-import { HttpError } from "@/network";
-import type { ContentMissing, ContentNote, ContentResponse } from "@/types";
-import { readNoteContent } from "@/vault-metadata";
+import { HttpError, TokenRejectedError } from "@/network";
+import type { ContentMissing, ContentNote, IngestResponse } from "@/types";
+import { readRequestedNote } from "@/vault-metadata";
 import {
   createFixtureVault,
   DAILY,
@@ -31,13 +31,8 @@ type Sent = { notes: ContentNote[]; missing: ContentMissing[] };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 function reader(vault: TestVault, scope: (path: string) => boolean) {
-  return async (path: string): Promise<ContentReadResult<ResolvedAttachment>> => {
-    const file = vault.app.vault.getAbstractFileByPath(path) as TFile | null;
-    if (!file || file.extension !== "md") return { kind: "missing", reason: "not_found" };
-    if (!scope(path)) return { kind: "missing", reason: "out_of_scope" };
-    const read = await readNoteContent(vault.app, file);
-    return { kind: "note", note: read.note, resolved: read.resolved };
-  };
+  return (path: string): Promise<ContentReadResult<ResolvedAttachment>> =>
+    readRequestedNote(vault.app, path, scope);
 }
 
 function harness(
@@ -48,7 +43,13 @@ function harness(
   const sent: Sent[] = [];
   const uploads: string[][] = [];
   const timers: Array<() => void> = [];
-  let response: ContentResponse = { accepted: 0, rejected: [], attachmentsNeeded: [] };
+  const delays: number[] = [];
+  const cleared: number[] = [];
+  let response: IngestResponse = {
+    accepted: 0,
+    rejected: [],
+    attachmentsNeeded: [],
+  };
 
   const queue = new ContentRequestQueue<ResolvedAttachment>({
     read: reader(vault, scope),
@@ -60,8 +61,11 @@ function harness(
       uploads.push(hashes);
     },
     onTokenRejected: () => {},
-    setTimer: (fn) => timers.push(fn),
-    clearTimer: () => {},
+    setTimer: (fn, ms) => {
+      delays.push(ms);
+      return timers.push(fn);
+    },
+    clearTimer: (id) => cleared.push(id),
     ...overrides,
   });
 
@@ -70,7 +74,14 @@ function harness(
     sent,
     uploads,
     timers,
-    respond: (r: ContentResponse) => {
+    delays,
+    cleared,
+    // Fire the latest retry timer and wait for the retry to finish.
+    retry: async () => {
+      timers[timers.length - 1]();
+      await queue.run();
+    },
+    respond: (r: IngestResponse) => {
       response = r;
     },
   };
@@ -201,14 +212,165 @@ test("a network failure keeps the batch for a retry", async () => {
   assert.equal(h.timers.length, 1);
 
   fail = false;
-  h.timers[0]();
-  // The retry runs on its own; wait for it to drain (hashing is async).
-  for (let i = 0; i < 100 && h.queue.size > 0; i++) {
-    await new Promise((r) => setTimeout(r, 5));
-  }
+  await h.retry();
 
   assert.equal(sent.length, 2);
   assert.equal(h.queue.size, 0);
+});
+
+test("retries wait 1 s, 5 s, 30 s and 2 min, then give up until the next reconnect", async () => {
+  const vault = bigVault(2);
+  const h = harness(vault, {
+    send: async () => {
+      throw new Error("offline");
+    },
+  });
+
+  h.queue.request("req-1", vault.markdownFiles().map((f) => f.path));
+  await h.queue.run();
+  for (let i = 0; i < 4; i++) await h.retry();
+
+  assert.deepEqual(h.delays, [1_000, 5_000, 30_000, 120_000]);
+  assert.equal(h.queue.size, 0);
+});
+
+test("a note that fails to read stays queued for the retry, never reported as not found", async () => {
+  const vault = bigVault(2);
+  const [broken, fine] = vault.markdownFiles().map((f) => f.path);
+  let failing = true;
+  const h = harness(vault, {
+    read: async (path) => {
+      if (path === broken && failing) throw new Error("disk busy");
+      return await readRequestedNote(vault.app, path, () => true);
+    },
+  });
+
+  h.queue.request("req-1", [broken, fine]);
+  await h.queue.run();
+
+  assert.deepEqual(
+    h.sent.map((s) => s.notes.map((n) => n.path)),
+    [[fine]],
+  );
+  assert.deepEqual(h.sent[0].missing, []);
+  assert.equal(h.queue.size, 1);
+
+  failing = false;
+  await h.retry();
+
+  assert.deepEqual(
+    h.sent[1].notes.map((n) => n.path),
+    [broken],
+  );
+  assert.equal(h.queue.size, 0);
+});
+
+test("a rejected token drops the queue and reports it", async () => {
+  const vault = bigVault(2);
+  let rejected = 0;
+  const h = harness(vault, {
+    send: async () => {
+      throw new TokenRejectedError();
+    },
+    onTokenRejected: () => {
+      rejected += 1;
+    },
+  });
+
+  h.queue.request("req-1", vault.markdownFiles().map((f) => f.path));
+  await h.queue.run();
+
+  assert.equal(rejected, 1);
+  assert.equal(h.queue.size, 0);
+  assert.equal(h.timers.length, 0);
+});
+
+test("stop() cancels a pending retry", async () => {
+  const vault = bigVault(1);
+  const h = harness(vault, {
+    send: async () => {
+      throw new Error("offline");
+    },
+  });
+
+  h.queue.request("req-1", [vault.markdownFiles()[0].path]);
+  await h.queue.run();
+  h.queue.stop();
+
+  assert.deepEqual(h.cleared, [1]);
+  assert.equal(h.queue.size, 0);
+});
+
+test("clear() drops queued requests and the queue keeps working", async () => {
+  const vault = bigVault(2);
+  let fail = true;
+  const h = harness(vault, {
+    send: async (notes, missing) => {
+      if (fail) throw new Error("offline");
+      h.sent.push({ notes, missing });
+      return undefined;
+    },
+  });
+  const [a, b] = vault.markdownFiles().map((f) => f.path);
+
+  h.queue.request("req-1", [a]);
+  await h.queue.run();
+  h.queue.clear();
+
+  assert.deepEqual(h.cleared, [1]);
+  assert.equal(h.queue.size, 0);
+
+  fail = false;
+  h.queue.request("req-2", [b]);
+  await h.queue.run();
+
+  assert.deepEqual(
+    h.sent.map((s) => s.notes.map((n) => n.path)),
+    [[b]],
+  );
+});
+
+test("a newer request for a path in flight keeps it queued", async () => {
+  const vault = bigVault(1);
+  const [path] = vault.markdownFiles().map((f) => f.path);
+  let h: ReturnType<typeof harness>;
+  let first = true;
+  h = harness(vault, {
+    send: async (notes, missing) => {
+      if (first) {
+        first = false;
+        h.queue.request("req-2", [path]);
+      }
+      h.sent.push({ notes, missing });
+      return undefined;
+    },
+  });
+
+  h.queue.request("req-1", [path]);
+  await h.queue.run();
+
+  assert.deepEqual(
+    h.sent.map((s) => s.notes.map((n) => n.requestId)),
+    [["req-1"], ["req-2"]],
+  );
+  assert.equal(h.queue.size, 0);
+});
+
+test("a batch counts notes and missing together, 50 at most", async () => {
+  const vault = bigVault(49);
+  const h = harness(vault);
+
+  h.queue.request("req-1", [
+    ...vault.markdownFiles().map((f) => f.path),
+    "gone-1.md",
+    "gone-2.md",
+  ]);
+  await h.queue.run();
+
+  assert.deepEqual(
+    h.sent.map((s) => s.notes.length + s.missing.length),
+    [50, 1],
+  );
 });
 
 test("a refused batch (409) is dropped, not retried", async () => {

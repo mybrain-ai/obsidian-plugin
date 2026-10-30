@@ -30,7 +30,7 @@ export type DeleteEvent = { op: "delete"; path: string };
 export type RenameEvent = { op: "rename"; oldPath: string; newPath: string };
 
 /** Protocol 2 metadata for one note: everything the server needs to triage it,
- * without the note text (see SPEC-obsidian-protocolo-v2, section 3). */
+ * without the note text. */
 export type NoteMetadata = {
   path: string;
   name: string;
@@ -60,8 +60,10 @@ export const PROTOCOL_VERSION = 2;
  * text on request; 1 = a server that predates protocol 2. */
 export type ServerProtocol = 1 | 2;
 
-/** Configuration of the core Templates and Daily notes plugins. `null` when the
- * plugin is off or its configuration can't be read; `""` is the vault root. */
+/** Core Templates and Daily notes settings, all `null` when that plugin is off
+ * or `core-plugins.json` can't be read. A Templates plugin with no folder is
+ * also `null`; the Daily notes folder is `""` for the vault root, and an empty
+ * Daily notes format is Obsidian's default, `YYYY-MM-DD`. */
 export type NativeNoteSettings = {
   templatesFolder: string | null;
   dailyNotesFolder: string | null;
@@ -98,8 +100,7 @@ export type ContentMissing = {
   reason: "not_found" | "out_of_scope";
 };
 
-export type ContentResponse = IngestResponse;
-
+/** Reply to `/ingest`, `/manifest` and `/content`. */
 export type IngestResponse = {
   accepted: number;
   rejected: Array<{ path: string; reason: string }>;

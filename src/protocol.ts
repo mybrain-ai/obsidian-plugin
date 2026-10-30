@@ -38,7 +38,7 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
         const parsed = parseHttpsEndpoint(endpoint);
 
         if (!parsed) {
-          new Notice("MyBrain: deep-link endpoint must be a valid https URL");
+          new Notice("MyBrain: deep-link endpoint must be a valid HTTPS URL");
           return;
         }
 
@@ -81,7 +81,7 @@ export function registerInstallProtocolHandler(plugin: MyBrainPlugin): void {
       try {
         await plugin.applyDeepLinkSettings(incoming);
         new Notice(
-          "MyBrain: token installed — open Settings → MyBrain to check the connection.",
+          "MyBrain: token installed — open settings → MyBrain to check the connection.",
         );
 
         _openPluginSettings(plugin);
@@ -128,9 +128,7 @@ function _openPluginSettings(plugin: MyBrainPlugin): void {
   // closing. Opening the settings window synchronously from the protocol
   // handler can silently no-op — especially when Obsidian was just launched
   // by the deep link — leaving the user with no visible result.
-  plugin.app.workspace.onLayoutReady(() =>
-    window.setTimeout(openSettings, 0),
-  );
+  plugin.app.workspace.onLayoutReady(() => window.setTimeout(openSettings, 0));
 }
 
 function _diffSettings(plugin: MyBrainPlugin, incoming: Incoming): DiffEntry[] {

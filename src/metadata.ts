@@ -1,9 +1,9 @@
-import { sha256 } from "@/hash";
 import type { AttachmentRef, NoteMetadata } from "@/types";
 import { uniq } from "@/util";
 
 /** Frontmatter keys that may leave the machine. Any other property stays in
- * the vault: a property can be personal data too (e.g. `diagnosis:`). */
+ * the vault: a property can be personal data too (e.g. `diagnosis:`).
+ * `private` and `kanban-plugin` are here because MyBrain's triage reads them. */
 export const ALLOWED_FRONTMATTER_KEYS: readonly string[] = [
   "tags",
   "aliases",
@@ -12,6 +12,8 @@ export const ALLOWED_FRONTMATTER_KEYS: readonly string[] = [
   "date",
   "source",
   "url",
+  "private",
+  "kanban-plugin",
 ];
 
 export type NoteMetadataInput = {
@@ -19,6 +21,8 @@ export type NoteMetadataInput = {
   basename: string;
   stat: { ctime: number; mtime: number; size: number };
   content: string;
+  // sha256 of `content`.
+  hash: string;
   frontmatter: Record<string, unknown> | undefined;
   // Offset where the frontmatter block ends, from the metadata cache. Null
   // when the note has no frontmatter.
@@ -50,8 +54,12 @@ export function filterFrontmatter(
 /** Words in the note body, frontmatter excluded: a whitespace-separated token
  * counts when it has at least one letter or digit, so markdown punctuation
  * (`-`, `>`, `|`, `---`) doesn't. */
-export function countWords(content: string, frontmatterEnd: number | null): number {
-  const body = frontmatterEnd === null ? content : content.slice(frontmatterEnd);
+export function countWords(
+  content: string,
+  frontmatterEnd: number | null,
+): number {
+  const body =
+    frontmatterEnd === null ? content : content.slice(frontmatterEnd);
 
   let words = 0;
 
@@ -70,9 +78,7 @@ export function normalizeTags(tags: string[] | null): string[] {
   );
 }
 
-export async function buildNoteMetadata(
-  input: NoteMetadataInput,
-): Promise<NoteMetadata> {
+export function buildNoteMetadata(input: NoteMetadataInput): NoteMetadata {
   return {
     path: input.path,
     name: input.basename,
@@ -80,7 +86,7 @@ export async function buildNoteMetadata(
     size: input.stat.size,
     ctime: input.stat.ctime,
     mtime: input.stat.mtime,
-    hash: await sha256(input.content),
+    hash: input.hash,
     words: countWords(input.content, input.frontmatterEnd),
     frontmatter: filterFrontmatter(input.frontmatter),
     tags: normalizeTags(input.tags),

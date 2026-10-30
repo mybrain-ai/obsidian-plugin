@@ -1,13 +1,6 @@
+import { Notice, Plugin, TAbstractFile, TFile, debounce } from "obsidian";
 import {
-  Notice,
-  Plugin,
-  TAbstractFile,
-  TFile,
-  debounce,
-  type CachedMetadata,
-} from "obsidian";
-import {
-  resolveAttachments,
+  AttachmentHashCache,
   uploadAttachments,
   type ResolvedAttachment,
 } from "@/attachments";
@@ -15,29 +8,18 @@ import {
   BATCH_SIZE,
   DEBOUNCE_MS,
   DRAIN_INTERVAL_MS,
-  ROOT_SCOPE_SENTINEL,
   TOKEN_REJECTED_NOTICE,
   UPDATE_CHECK_TICK_MS,
 } from "@/constants";
-import {
-  buildContentBody,
-  ContentRequestQueue,
-  type ContentReadResult,
-} from "@/content";
+import { buildContentBody, ContentRequestQueue } from "@/content";
 import { getOrCreateDeviceId } from "@/device";
 import { sha256 } from "@/hash";
-import {
-  getJson,
-  isProtocolRejection,
-  postJson,
-  TokenRejectedError,
-  type Auth,
-} from "@/network";
+import { getJson, postJson, TokenRejectedError, type Auth } from "@/network";
 import {
   registerInstallProtocolHandler,
   registerOpenProtocolHandler,
 } from "@/protocol";
-import { enumerateVaultTree } from "@/scope";
+import { enumerateVaultTree, isPathInScope } from "@/scope";
 import {
   ackBatch,
   emptyState,
@@ -57,7 +39,6 @@ import {
   PROTOCOL_VERSION,
   type ContentMissing,
   type ContentNote,
-  type ContentResponse,
   type IngestEvent,
   type IngestResponse,
   type LatestPluginRelease,
@@ -68,23 +49,17 @@ import {
 import { checkForUpdates } from "@/update";
 import { extractLinks } from "@/util";
 import {
-  collectManifestV2,
-  readNoteContent,
-  readNoteMetadata,
+  manifestV2Body,
+  noteMetadata,
+  readNote,
+  readNotes,
+  readRequestedNote,
+  type NoteRead,
+  type RequestEnvelope,
 } from "@/vault-metadata";
 import { ObsidianWebSocketManager } from "@/websocket";
 
-type FileSnapshot = Omit<
-  UpsertEvent,
-  "op" | "wikilinks" | "mdLinks" | "attachments"
->;
 type ManifestFile = Omit<UpsertEvent, "op" | "wikilinks" | "mdLinks">;
-
-type ReadFile = {
-  content: string;
-  frontmatter: Record<string, unknown> | null;
-  hash: string;
-};
 
 type StoredData = {
   settings: MyBrainSettings;
@@ -102,6 +77,7 @@ export default class MyBrainPlugin extends Plugin {
   // already enqueued — Obsidian fires `modify` for autosave even when the
   // file is byte-identical to disk.
   private readonly lastEnqueuedHashes = new Map<string, string>();
+  private readonly attachmentHashes = new AttachmentHashCache();
   // Identifies this plugin install to the backend (header on every request).
   // Self-generated per machine and kept in device-local storage — never in
   // `data.json`, which syncs with the vault — so each machine running this
@@ -119,10 +95,16 @@ export default class MyBrainPlugin extends Plugin {
   // Notes the server asked for (`content_requested`): the only path by which
   // note text leaves the vault under protocol 2.
   private readonly contentQueue = new ContentRequestQueue<ResolvedAttachment>({
-    read: (path) => this.readRequestedNote(path),
+    read: (path) =>
+      readRequestedNote(
+        this.app,
+        path,
+        (p) => this.isInScope(p),
+        this.attachmentHashes,
+      ),
     send: (notes, missing) => this.postContent(notes, missing),
     uploadAttachments: async (hashes, resolved) => {
-      for (const r of resolved) this.resolvedAttachments.set(r.ref.hash, r);
+      this.rememberAttachments(resolved);
       await this.uploadAttachmentsForBatch(hashes);
     },
     onTokenRejected: () => this.markTokenRejected(),
@@ -273,6 +255,7 @@ export default class MyBrainPlugin extends Plugin {
 
   private doRestartWebSocket(): void {
     this.wsManager.stop();
+    this.contentQueue.clear();
     this.startWebSocket();
   }
 
@@ -348,10 +331,8 @@ export default class MyBrainPlugin extends Plugin {
     return await this.pushManifest({ initial: true });
   }
 
-  /** Full sync of the notes in scope. Tries protocol 2 (metadata only) and,
-   * when `fallbackToV1` is set, falls back to the protocol 1 manifest (with
-   * note text) for a server that predates protocol 2. Without the fallback it
-   * only finds out which protocol the server speaks. */
+  /** Full sync of the notes in scope, negotiating the protocol (see
+   * `pushNegotiatedManifest`). */
   async pushManifest({
     initial,
     fallbackToV1 = true,
@@ -386,12 +367,15 @@ export default class MyBrainPlugin extends Plugin {
     let sentCount = 0;
 
     try {
+      // Read once: the protocol 1 fallback reuses the reads of the v2 attempt.
+      const reads = await readNotes(this.app, files, this.attachmentHashes);
+
       const outcome = await pushNegotiatedManifest({
         sendV2: async () => {
-          sentCount = await this._postManifestV2(files);
+          sentCount = await this._postManifestV2(reads);
         },
         sendV1: async () => {
-          sentCount = await this._postManifestV1(files);
+          sentCount = await this._postManifestV1(reads);
         },
         fallbackToV1,
         log: (message) => console.warn(message),
@@ -404,7 +388,15 @@ export default class MyBrainPlugin extends Plugin {
 
       await this.saveAll();
 
-      if (initial) new Notice(`MyBrain: synced ${sentCount} notes`);
+      const unreadable = files.length - reads.length;
+
+      if (initial) {
+        new Notice(
+          unreadable > 0
+            ? `MyBrain: synced ${sentCount} notes; ${unreadable} could not be read (see console)`
+            : `MyBrain: synced ${sentCount} notes`,
+        );
+      }
 
       return outcome.sent;
     } catch (e) {
@@ -419,11 +411,9 @@ export default class MyBrainPlugin extends Plugin {
   }
 
   /** Protocol 2 manifest: metadata of every note in scope, no text. */
-  private async _postManifestV2(files: TFile[]): Promise<number> {
-    const body = await collectManifestV2(this.app, files, {
-      vaultId: this.settings.vaultId,
-      vaultName: this.settings.vaultName || this.app.vault.getName(),
-      clientTime: new Date().toISOString(),
+  private async _postManifestV2(reads: NoteRead[]): Promise<number> {
+    const body = await manifestV2Body(this.app, reads, {
+      ...this.envelope(),
       pluginVersion: this.manifest.version,
     });
 
@@ -435,25 +425,22 @@ export default class MyBrainPlugin extends Plugin {
   }
 
   /** Protocol 1 manifest (plugin 1.0.x behaviour): every note with its text. */
-  private async _postManifestV1(files: TFile[]): Promise<number> {
-    const manifest: ManifestFile[] = [];
+  private async _postManifestV1(reads: NoteRead[]): Promise<number> {
+    const manifest: ManifestFile[] = reads.map((read) => {
+      this.rememberAttachments(read.resolved);
 
-    for (const file of files) {
-      try {
-        manifest.push(await this._buildManifestFile(file));
-      } catch (e) {
-        console.error("MyBrain: failed to read", file.path, e);
-      }
-    }
+      return {
+        ...this.snapshotV1(read),
+        attachments: read.resolved.map((r) => r.ref),
+      };
+    });
 
     const response = await postJson<IngestResponse | undefined>(
       this.auth(),
       "/manifest",
       {
         apiVersion: API_VERSION,
-        vaultId: this.settings.vaultId,
-        vaultName: this.settings.vaultName || this.app.vault.getName(),
-        clientTime: new Date().toISOString(),
+        ...this.envelope(),
         files: manifest,
         folders: enumerateVaultTree(this.app),
       },
@@ -474,6 +461,8 @@ export default class MyBrainPlugin extends Plugin {
     if (this.settings.serverProtocol) return this.settings.serverProtocol;
 
     await this.pushManifest({ initial: false, fallbackToV1: false });
+
+    if (this.tokenRejected) throw new TokenRejectedError();
 
     if (!this.settings.serverProtocol) {
       throw new Error("MyBrain: could not determine the server protocol");
@@ -594,9 +583,11 @@ export default class MyBrainPlugin extends Plugin {
     if (!this.isInScope(file.path)) return;
 
     try {
-      const event = await this.buildUpsertEventV2(file);
+      const hash = await sha256(await this.app.vault.cachedRead(file));
 
-      if (this.lastEnqueuedHashes.get(file.path) === event.hash) return;
+      if (this.lastEnqueuedHashes.get(file.path) === hash) return;
+
+      const event = await this.buildUpsertEventV2(file);
 
       this.queue = enqueue(this.queue, event);
       this.lastEnqueuedHashes.set(file.path, event.hash);
@@ -608,59 +599,49 @@ export default class MyBrainPlugin extends Plugin {
   }
 
   private async buildUpsertEventV2(file: TFile): Promise<UpsertEventV2> {
-    const { metadata } = await readNoteMetadata(this.app, file);
+    const read = await readNote(this.app, file, this.attachmentHashes);
 
-    return { op: "upsert", ...metadata };
+    return { op: "upsert", ...noteMetadata(this.app, read) };
   }
 
   private async buildUpsertEventV1(file: TFile): Promise<UpsertEvent> {
-    const snapshot = await this.buildFileSnapshot(file);
+    const read = await readNote(this.app, file, this.attachmentHashes);
 
-    const cache = this.app.metadataCache.getFileCache(file);
-
-    const resolved = await resolveAttachments(this.app, file);
-
-    for (const r of resolved) {
-      this.resolvedAttachments.set(r.ref.hash, r);
-    }
+    this.rememberAttachments(read.resolved);
 
     return {
       op: "upsert",
-      ...snapshot,
-      wikilinks: extractLinks(cache?.links),
-      mdLinks: extractLinks(cache?.embeds),
-      attachments: resolved.map((r) => r.ref),
+      ...this.snapshotV1(read),
+      wikilinks: extractLinks(read.cache?.links),
+      mdLinks: extractLinks(read.cache?.embeds),
+      attachments: read.resolved.map((r) => r.ref),
     };
   }
 
-  private async buildFileSnapshot(file: TFile): Promise<FileSnapshot> {
-    const read = await this.readMarkdownFile(file);
+  /** A note as protocol 1 sends it: its text and full frontmatter. */
+  private snapshotV1(read: NoteRead): Omit<ManifestFile, "attachments"> {
+    const { file, cache } = read;
 
     return {
       path: file.path,
       name: file.basename,
       ext: "md",
       content: read.content,
-      frontmatter: read.frontmatter,
+      frontmatter: cache?.frontmatter
+        ? Object.fromEntries(
+            Object.entries(cache.frontmatter).filter(([k]) => k !== "position"),
+          )
+        : null,
       mtime: file.stat.mtime,
       size: file.stat.size,
       hash: read.hash,
     };
   }
 
-  private async _buildManifestFile(file: TFile): Promise<ManifestFile> {
-    const snapshot = await this.buildFileSnapshot(file);
-
-    const resolved = await resolveAttachments(this.app, file);
-
-    for (const r of resolved) {
-      this.resolvedAttachments.set(r.ref.hash, r);
-    }
-
-    return {
-      ...snapshot,
-      attachments: resolved.map((r) => r.ref),
-    };
+  /** Attachments a sent payload referenced, kept so the ones the server asks
+   * for can be uploaded. */
+  private rememberAttachments(resolved: readonly ResolvedAttachment[]): void {
+    for (const r of resolved) this.resolvedAttachments.set(r.ref.hash, r);
   }
 
   /** A queued note rebuilt as it is now, or null when it's gone or out of
@@ -676,58 +657,24 @@ export default class MyBrainPlugin extends Plugin {
     return await build(file);
   }
 
-  private async readRequestedNote(
-    path: string,
-  ): Promise<ContentReadResult<ResolvedAttachment>> {
-    const file = this.app.vault.getAbstractFileByPath(path);
-
-    if (!(file instanceof TFile) || file.extension !== "md") {
-      return { kind: "missing", reason: "not_found" };
-    }
-
-    // Never send the text of a note outside the folders the user chose, even
-    // when the server asks for it.
-    if (!this.isInScope(file.path)) {
-      return { kind: "missing", reason: "out_of_scope" };
-    }
-
-    const read = await readNoteContent(this.app, file);
-
-    return { kind: "note", note: read.note, resolved: read.resolved };
-  }
-
   private async postContent(
     notes: ContentNote[],
     missing: ContentMissing[],
-  ): Promise<ContentResponse | undefined> {
-    return await postJson<ContentResponse | undefined>(
+  ): Promise<IngestResponse | undefined> {
+    return await postJson<IngestResponse | undefined>(
       this.auth(),
       "/content",
-      buildContentBody(
-        {
-          vaultId: this.settings.vaultId,
-          vaultName: this.settings.vaultName || this.app.vault.getName(),
-          clientTime: new Date().toISOString(),
-        },
-        notes,
-        missing,
-      ),
+      buildContentBody(this.envelope(), notes, missing),
     );
   }
 
-  private async readMarkdownFile(file: TFile): Promise<ReadFile> {
-    const content = await this.app.vault.cachedRead(file);
-
-    const cache: CachedMetadata | null =
-      this.app.metadataCache.getFileCache(file);
-
-    const frontmatter = cache?.frontmatter
-      ? Object.fromEntries(
-          Object.entries(cache.frontmatter).filter(([k]) => k !== "position"),
-        )
-      : null;
-
-    return { content, frontmatter, hash: await sha256(content) };
+  /** Fields every request body carries. */
+  private envelope(): RequestEnvelope {
+    return {
+      vaultId: this.settings.vaultId,
+      vaultName: this.settings.vaultName || this.app.vault.getName(),
+      clientTime: new Date().toISOString(),
+    };
   }
 
   private scheduleFlush(key: string, fn: () => Promise<void>): void {
@@ -770,20 +717,13 @@ export default class MyBrainPlugin extends Plugin {
 
   private async flush(batch: IngestEvent[]): Promise<boolean> {
     try {
-      const protocol = await this.ensureServerProtocol();
-
-      let response: IngestResponse | undefined;
-
-      try {
-        response = await this.postIngest(batch, protocol);
-      } catch (e) {
-        // The server went back to a version without protocol 2.
-        if (protocol !== 2 || !isProtocolRejection(e)) throw e;
-
-        console.warn("MyBrain: server refused protocol 2 events, using protocol 1");
-        this.settings.serverProtocol = 1;
-        response = await this.postIngest(batch, 1);
-      }
+      // Edits follow the protocol the last manifest push agreed on. A refused
+      // batch is retried as is, never re-sent as protocol 1 with note text:
+      // only a manifest push changes the protocol.
+      const response = await this.postIngest(
+        batch,
+        await this.ensureServerProtocol(),
+      );
 
       this.queue = ackBatch(this.queue, batch.length);
 
@@ -829,9 +769,7 @@ export default class MyBrainPlugin extends Plugin {
     return await postJson<IngestResponse>(this.auth(), "/ingest", {
       ...(protocol === 2 ? { protocol: 2 } : {}),
       apiVersion: API_VERSION,
-      vaultId: this.settings.vaultId,
-      vaultName: this.settings.vaultName || this.app.vault.getName(),
-      clientTime: new Date().toISOString(),
+      ...this.envelope(),
       events,
     });
   }
@@ -878,18 +816,10 @@ export default class MyBrainPlugin extends Plugin {
   }
 
   private isInScope(path: string): boolean {
-    if (path.startsWith(`${this.app.vault.configDir}/`)) return false;
-
-    const scope = this.settings.inScopeFolders;
-
-    if (scope.length === 0) return true;
-
-    return scope.some((prefix) => {
-      // The root sentinel matches files directly in the vault root (no folder
-      // segment); any other entry is a folder prefix.
-      if (prefix === ROOT_SCOPE_SENTINEL) return !path.includes("/");
-
-      return path === prefix || path.startsWith(`${prefix}/`);
-    });
+    return isPathInScope(
+      path,
+      this.settings.inScopeFolders,
+      this.app.vault.configDir,
+    );
   }
 }

@@ -5,12 +5,13 @@ All notable changes to MyBrain are documented here.
 ## 1.1.0
 
 - Metadata first, text on request (sync protocol 2). The first sync, edits, and **Resync full vault** now send only the list of notes in the folders you chose: path, name, size, creation and modification times, content hash, word count, tags (from the note body and its properties), resolved links, links to notes that don't exist yet, embeds, and attachment references. The text of a note, and the attachments it embeds, go only when MyBrain asks for that note, which happens when you include it. Opening the install link from the web app now sends that list, not the text of the whole vault.
-- Only these properties leave your vault: `tags`, `aliases`, `created`, `updated`, `date`, `source`, `url`. Any other frontmatter key stays on your machine.
+- Only these properties leave your vault: `tags`, `aliases`, `created`, `updated`, `date`, `source`, `url`, `private` and `kanban-plugin`. MyBrain reads the last two to hold notes marked `private: true` for your review and to skip Kanban boards. Any other frontmatter key stays on your machine.
 - Links are now resolved in Obsidian (aliases included) before they're sent, and they come with every sync, not only with edits.
 - The plugin reads the folder and date format of the core Templates and Daily notes plugins, when they are on, so MyBrain can tell templates and daily notes apart.
 - MyBrain can ask for a note's text over the WebSocket (`content_requested`); the plugin answers in batches of 50 on `POST /content`, never for notes outside the chosen folders. On every (re)connect the plugin says hello so requests left open while it was off are sent again.
 - Older MyBrain servers keep working: if the server doesn't accept the new protocol, the plugin falls back to the 1.0 behavior and logs it in the developer console.
 - README: describes what leaves your machine and when, and links to the privacy policy at www.mybrain.ai/privacy.
+- An embed that points at part of a file (`![[report.pdf#page=2]]`) now sends that file as an attachment too.
 
 ## 1.0.6
 
