@@ -1,7 +1,7 @@
 {
   "id": "mybrain-ai",
   "name": "mybrain.ai",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minAppVersion": "1.13.0",
   "description": "Syncs your vault to MyBrain so notes are searchable alongside your other knowledge sources. Sends the list of notes in the folders you choose over HTTPS; a note's text and attachments go only once you include it in MyBrain. Requires a MyBrain account.",
   "author": "MyBrain",

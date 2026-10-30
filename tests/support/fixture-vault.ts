@@ -1,0 +1,112 @@
+// The vault behind tests/fixtures/obsidian/*.json, with each case the protocol must get right.
+import type { TestVault } from "@test/support/types";
+import { createVault } from "@test/support/vault";
+
+export const MOC = "02 Áreas/Pesquisa/MOC Pesquisa.md";
+export const DIARY = "02 Áreas/Pesquisa/Diary study - roteiro.md";
+export const DAILY = "Diário/2026-10-28.md";
+export const TEMPLATE = "Templates/Reunião.md";
+export const PDF = "Anexos/relatorio-atlas-2025.pdf";
+
+export const MOC_CONTENT = [
+  "---",
+  "tags: [pesquisa]",
+  "aliases: [Pesquisa MOC]",
+  "created: 2026-03-02",
+  "diagnostico: confidencial",
+  "---",
+  "# MOC Pesquisa",
+  "",
+  "Mapa da pesquisa de método. Ver [[Diary study - roteiro|Diary study]] e [[Entrevista 12]].",
+  "",
+  "#pesquisa/metodo",
+  "",
+  "![[relatorio-atlas-2025.pdf]]",
+  "",
+].join("\n");
+
+export const DIARY_CONTENT = [
+  "---",
+  "aliases: [Diary study]",
+  "---",
+  "Roteiro do diary study com cinco perguntas abertas.",
+  "",
+].join("\n");
+
+export const DAILY_CONTENT = "Dia curto. Nada a registrar.\n";
+
+export const TEMPLATE_CONTENT = "## Pauta\n\n- {{date}}\n";
+
+export const PDF_BYTES = new TextEncoder().encode("%PDF-1.7 fixture");
+
+export const VAULT_ENVELOPE = {
+  vaultId: "11111111-2222-4333-8444-555555555555",
+  vaultName: "Test vault",
+  clientTime: "2026-10-28T15:00:00.000Z",
+  pluginVersion: "1.1.0",
+};
+
+/** A fresh copy of the fixture vault. */
+export function createFixtureVault(): TestVault {
+  return createVault({
+    notes: [
+      {
+        path: MOC,
+        content: MOC_CONTENT,
+        ctime: 1761000000000,
+        mtime: 1761600000000,
+        frontmatter: {
+          tags: ["pesquisa"],
+          aliases: ["Pesquisa MOC"],
+          created: "2026-03-02",
+          diagnostico: "confidencial",
+        },
+        bodyTags: ["#pesquisa/metodo"],
+        embeds: ["relatorio-atlas-2025.pdf"],
+        // Obsidian counts embeds as links too.
+        resolvedLinks: { [DIARY]: 1, [PDF]: 1 },
+        unresolvedLinks: { "Entrevista 12": 1 },
+      },
+      {
+        path: DIARY,
+        content: DIARY_CONTENT,
+        ctime: 1761000000000,
+        mtime: 1761100000000,
+        frontmatter: { aliases: ["Diary study"] },
+      },
+      {
+        path: DAILY,
+        content: DAILY_CONTENT,
+        ctime: 1761650000000,
+        mtime: 1761650000000,
+      },
+      {
+        path: TEMPLATE,
+        content: TEMPLATE_CONTENT,
+        ctime: 1760000000000,
+        mtime: 1760000000000,
+      },
+    ],
+    binaries: [
+      {
+        path: PDF,
+        bytes: PDF_BYTES,
+        ctime: 1761000000000,
+        mtime: 1761000000000,
+      },
+    ],
+    config: {
+      ".obsidian/core-plugins.json": JSON.stringify({
+        "file-explorer": true,
+        templates: true,
+        "daily-notes": true,
+      }),
+      ".obsidian/templates.json": JSON.stringify({ folder: "Templates" }),
+      ".obsidian/daily-notes.json": JSON.stringify({
+        folder: "Diário",
+        format: "YYYY-MM-DD",
+        template: "Templates/Diária",
+      }),
+    },
+  });
+}
