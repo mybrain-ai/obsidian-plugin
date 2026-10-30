@@ -6,18 +6,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const staged = process.argv.includes("--staged");
-
-function read(path) {
-  if (staged) {
-    return execFileSync("git", ["show", `:${path}`], { encoding: "utf8" });
-  }
-  return readFileSync(path, "utf8");
-}
-
 const source = staged ? "the staged changes" : "the working tree";
-const { version } = JSON.parse(read("manifest.json"));
+const { version } = JSON.parse(_read("manifest.json"));
 
-const hasSection = read("CHANGELOG.md")
+const hasSection = _read("CHANGELOG.md")
   .split("\n")
   .some((line) => line.trim() === `## ${version}`);
 
@@ -31,3 +23,11 @@ if (!hasSection) {
 }
 
 console.log(`✓ CHANGELOG.md has a "## ${version}" section.`);
+
+function _read(path) {
+  if (staged) {
+    return execFileSync("git", ["show", `:${path}`], { encoding: "utf8" });
+  }
+
+  return readFileSync(path, "utf8");
+}

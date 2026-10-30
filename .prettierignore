@@ -1,0 +1,8 @@
+main.js
+node_modules/
+tests/fixtures/
+package-lock.json
+.*/
+!.github/
+!.husky/
+*.md
