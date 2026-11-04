@@ -89,5 +89,5 @@ function _setup() {
     { vaultName: "" },
   );
 
-  return { ...h, queue: createContentQueue(h.deps) };
+  return { ...h, queue: createContentQueue(h.deps, () => {}) };
 }

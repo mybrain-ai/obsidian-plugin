@@ -10,7 +10,7 @@ import {
   isQueueState,
   nextBatch,
 } from "@/core/sync/queue";
-import type { IngestEvent } from "@/core/sync/types";
+import type { IngestEvent, UpsertEventV2 } from "@/core/sync/types";
 
 test("isQueueState accepts a queue and refuses anything the queue code would crash on", () => {
   assert.equal(isQueueState(emptyState()), true);
@@ -92,19 +92,54 @@ test("failBatch delays follow 1 s, 5 s, 30 s, 5 min, 1 h (with up to 50% jitter)
   assert.equal(state.attemptCount, 6);
 });
 
-test("ackBatch drops the first count events and resets attempts", () => {
+test("ackBatch drops the events sent and resets attempts", () => {
   let state = emptyState();
 
   for (const p of ["a", "b", "c"]) state = enqueue(state, _del(p));
 
+  const sent = nextBatch(state, 2, 0);
+
   state = failBatch(state, 10);
-  state = ackBatch(state, 2);
+  state = ackBatch(state, sent);
 
   assert.deepEqual(state.events, [_del("c")]);
   assert.equal(state.attemptCount, 0);
   assert.equal(state.nextAttemptAt, 0);
 });
 
+test("an event queued while its batch is sent outlives the batch's ack", () => {
+  let state = enqueue(emptyState(), _upsert("a.md", "v2"));
+
+  state = enqueue(state, _upsert("b.md", "b1"));
+  const sent = nextBatch(state, 50, 0);
+
+  // The note is saved again before the server answers.
+  state = enqueue(state, _upsert("a.md", "v3"));
+  state = ackBatch(state, sent);
+
+  assert.deepEqual(state.events, [_upsert("a.md", "v3")]);
+});
+
 function _del(path: string): IngestEvent {
   return { op: "delete", path };
+}
+
+function _upsert(path: string, hash: string): UpsertEventV2 {
+  return {
+    op: "upsert",
+    path,
+    name: path,
+    ext: "md",
+    size: 1,
+    ctime: 1,
+    mtime: 1,
+    hash,
+    words: 1,
+    frontmatter: null,
+    tags: [],
+    links: [],
+    unresolved: [],
+    embeds: [],
+    attachments: [],
+  };
 }

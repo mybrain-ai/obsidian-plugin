@@ -250,6 +250,26 @@ test("a batch counts notes and missing together, 50 at most", async () => {
   );
 });
 
+test("notes the server calls stale are handed back to be sent as edits", async () => {
+  const stale: string[][] = [];
+  const h = _harness(_fakeRead(["a.md", "b.md", "c.md"]), {
+    onStale: (paths) => stale.push(paths),
+  });
+
+  h.respond({
+    accepted: 1,
+    rejected: [
+      { path: "a.md", reason: "stale" },
+      { path: "b.md", reason: "out_of_scope" },
+    ],
+    attachmentsNeeded: [],
+  });
+  h.queue.request("req-1", ["a.md", "b.md", "c.md"]);
+  await h.queue.run();
+
+  assert.deepEqual(stale, [["a.md"]]);
+});
+
 test("a refused batch (409) is dropped, not retried", async () => {
   const paths = _notePaths(2);
   const h = _harness(_fakeRead(paths), {
@@ -289,6 +309,7 @@ function _harness(
       uploads.push(hashes);
     },
     onTokenRejected: () => {},
+    onStale: () => {},
     timers,
     ...overrides,
   });

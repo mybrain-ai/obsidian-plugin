@@ -60,7 +60,7 @@ The plugin connects only to MyBrain's ingest endpoint. All traffic is over HTTPS
 ### HTTP endpoints
 
 - **`POST /manifest`** — the list of notes in the chosen folders, with the metadata described in [What leaves your machine, and when](#what-leaves-your-machine-and-when), plus the folder tree. No note text. Sent on first connect, when the folder choice changes, when you click **Resync full vault**, and whenever the server asks for a refresh via the WebSocket below.
-- **`POST /ingest`** — incremental vault changes, triggered (with a short debounce) by Obsidian's `create`/`modify`/`delete`/`rename` vault events. For a new or edited note: the same metadata as `/manifest`, no text. For a delete or rename: the path(s).
+- **`POST /ingest`** — incremental vault changes, triggered (with a short debounce) by Obsidian's `create`/`modify`/`delete`/`rename` vault events, and sent right away for a note MyBrain answers as out of date (`stale`) when it asked for its text. For a new or edited note: the same metadata as `/manifest`, no text. For a delete or rename: the path(s).
 - **`POST /content`** — the text of the notes MyBrain asked for, in batches of up to 50, each with its content hash. Only notes inside the chosen folders are ever sent; a requested note that was deleted or is outside the chosen folders is reported back as missing, without text.
 - **`POST /attachments`** — binary contents of attachment files embedded (`![[file.ext]]` or `![alt](path)`) in a note whose text was sent. Only sent when the server reports it doesn't already have a copy (content-hash deduplication).
 - **`GET /ping`** — health check, sent when you click **Test connection** in plugin settings.

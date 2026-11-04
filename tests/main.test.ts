@@ -159,6 +159,40 @@ test("an edit goes to /ingest as exactly this JSON", async () => {
   );
 });
 
+test("a note the server calls stale goes back to it as an edit", async () => {
+  const { services } = _setup(2, true);
+  const sent: ApiCall[] = [];
+
+  _fakeServer(sent, (path) =>
+    path === "/content"
+      ? {
+          status: 200,
+          json: {
+            accepted: 0,
+            rejected: [{ path: NOTE, reason: "stale" }],
+            attachmentsNeeded: [],
+          },
+        }
+      : { status: 200, json: ACK },
+  );
+
+  services.contentQueue.request("req-1", [NOTE]);
+  await services.contentQueue.run();
+  await settle();
+
+  assert.deepEqual(
+    sent.map((call) => call.path),
+    ["/content", "/ingest"],
+  );
+  assert.deepEqual(
+    (sent[1].body.events as Array<{ op: string; path: string }>).map((e) => [
+      e.op,
+      e.path,
+    ]),
+    [["upsert", NOTE]],
+  );
+});
+
 test("save writes the live settings and queue, in that order, and never the device id", async () => {
   const { services, vault, store } = _setup(2, true);
   const warn = console.warn;

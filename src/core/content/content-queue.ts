@@ -3,6 +3,7 @@ import type { ContentReadResult } from "@/core/content/types";
 import { TokenRejectedError, isClientError } from "@/core/errors";
 import type { ContentQueueDeps } from "@/core/ports";
 import { nextBackoffDelay } from "@/core/shared/backoff";
+import { quietly } from "@/core/shared/quietly";
 import type {
   ContentMissing,
   ContentNote,
@@ -151,10 +152,22 @@ export class ContentRequestQueue {
       }
     }
 
-    const rejected = response?.rejected.length ?? 0;
+    const rejected = response?.rejected ?? [];
 
-    if (rejected > 0) {
-      console.warn(`MyBrain: server refused ${rejected} requested note(s)`);
+    if (rejected.length > 0) {
+      const reasons = [...new Set(rejected.map((r) => r.reason))].join(", ");
+
+      console.warn(
+        `MyBrain: server refused ${rejected.length} requested note(s): ${reasons}`,
+      );
+    }
+
+    const stale = rejected
+      .filter((r) => r.reason === "stale")
+      .map((r) => r.path);
+
+    if (stale.length > 0) {
+      quietly("send stale notes again", () => this._deps.onStale(stale));
     }
 
     const needed = response?.attachmentsNeeded ?? [];

@@ -191,6 +191,9 @@ export interface ContentQueueDeps {
     resolved: ResolvedAttachment[],
   ): Promise<void>;
   onTokenRejected(): void;
+  /** Notes the server called `stale`: it holds another version than the one
+   * read, so their current version goes again as an edit. */
+  onStale(paths: string[]): void;
   timers: Timers;
 }
 
