@@ -2,6 +2,19 @@
 
 All notable changes to MyBrain are documented here.
 
+## 1.2.0
+
+- Attachments that fail to upload are retried automatically, also after Obsidian restarts. If they keep failing or MyBrain refuses one, a notice and a row in the plugin settings let you retry them.
+- **Test connection** shows "unexpected server reply" when the server answers with an empty body, instead of a JavaScript error message.
+- A damaged edit queue in the plugin's saved data no longer stops the plugin from loading. The queue starts empty; notes edited since the last sync are sent again at startup, but deletes and renames that were waiting in it are lost.
+- The "token rejected" notice shows once, even when several requests find the token rejected at the same time.
+- A token the server rejects during the update check is now treated like any other rejected token: the "token rejected" notice shows and syncing pauses until you paste a new one.
+- Pasting and saving a new token resumes syncing right away, instead of waiting for the next full sync.
+- Disabling the plugin right after changing the token or endpoint no longer reopens the server connection.
+- When the token, a setting or the settings from an install link can't be saved, a notice says so and the change is undone, so the plugin keeps using what is saved. A **Resync full vault** that can't be saved is undone the same way.
+- A sync that went through is no longer reported as failed when only saving its result fails.
+- Sync notices no longer point to the developer console: a failed sync suggests **Resync full vault**, and the count of notes that couldn't be read stands on its own.
+
 ## 1.1.0
 
 - Metadata first, text on request (sync protocol 2). The first sync, edits, and **Resync full vault** now send only the list of notes in the folders you chose: path, name, size, creation and modification times, content hash, word count, tags (from the note body and its properties), resolved links, links to notes that don't exist yet, embeds, and attachment references. The text of a note, and the attachments it embeds, go only when MyBrain asks for that note, which happens when you include it. Opening the install link from the web app now sends that list, not the text of the whole vault.

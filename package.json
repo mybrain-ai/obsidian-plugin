@@ -1,6 +1,6 @@
 {
   "name": "mybrain-obsidian",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "MyBrain — Obsidian community plugin",
   "license": "MIT",
@@ -9,20 +9,33 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit && tsc -p tests/tsconfig.json",
-    "test": "node scripts/run-tests.mjs",
-    "lint": "eslint src tests",
-    "release": "node scripts/bump-version.mjs",
+    "test": "node scripts/run-tests.mjs && npm run test:lint-rules",
+    "test:lint-rules": "node scripts/run-lint-tests.mjs",
+    "check:cycles": "madge --circular --extensions ts src",
+    "lint": "eslint src tests scripts --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "check:changelog": "node scripts/check-changelog.mjs",
+    "check:secrets": "node scripts/check-secrets.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/node": "^22.0.0",
     "esbuild": "^0.21.5",
     "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-boundaries": "^7.4.0",
+    "eslint-plugin-jsdoc": "^65.4.2",
     "eslint-plugin-obsidianmd": "^0.4.1",
     "husky": "^9.1.7",
+    "madge": "^8.0.0",
     "obsidian": "^1.13.1",
+    "prettier": "^3.9.10",
     "tslib": "^2.6.3",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "typescript-eslint": "8.67.0"
   }
 }

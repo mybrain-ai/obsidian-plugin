@@ -1,825 +1,380 @@
-import { Notice, Plugin, TAbstractFile, TFile, debounce } from "obsidian";
 import {
-  AttachmentHashCache,
-  uploadAttachments,
-  type ResolvedAttachment,
-} from "@/attachments";
+  type App,
+  Platform,
+  Plugin,
+  type PluginManifest,
+  debounce,
+} from "obsidian";
+
 import {
-  BATCH_SIZE,
-  DEBOUNCE_MS,
   DRAIN_INTERVAL_MS,
-  TOKEN_REJECTED_NOTICE,
   UPDATE_CHECK_TICK_MS,
-} from "@/constants";
-import { buildContentBody, ContentRequestQueue } from "@/content";
-import { getOrCreateDeviceId } from "@/device";
-import { sha256 } from "@/hash";
-import { getJson, postJson, TokenRejectedError, type Auth } from "@/network";
+  UPDATE_LATEST_VERSION_KEY,
+} from "@/core/constants";
+import { createContentQueue } from "@/core/content/content-sync";
+import type { Notifier, PluginDataPort, SyncDeps } from "@/core/ports";
+import { quietlyAsync } from "@/core/shared/quietly";
+import { AttachmentRetry } from "@/core/sync/attachment-retry";
+import { AttachmentUpload } from "@/core/sync/attachment-upload";
+import { checkConnection } from "@/core/sync/connection-check";
+import { getOrCreateDeviceId } from "@/core/sync/device";
+import { EditSync } from "@/core/sync/edit-sync";
+import { FullSync } from "@/core/sync/full-sync";
+import { serverEventHandlers } from "@/core/sync/server-events";
+import { canSync } from "@/core/sync/settings";
+import { SyncController } from "@/core/sync/sync-controller";
+import { SyncState } from "@/core/sync/sync-state";
+import { markTokenRejected } from "@/core/sync/sync-steps";
+import type {
+  AuthState,
+  DeepLinkSettings,
+  MyBrainSettings,
+  PendingUpload,
+  StoredData,
+} from "@/core/sync/types";
+import { ensureVaultIdentity } from "@/core/sync/vault-identity";
+import { UpdateCheck } from "@/core/update/update-check";
+import { HttpMyBrainApi } from "@/infra/http/mybrain-api";
+import { ObsidianDeviceStore } from "@/infra/obsidian/device-store";
+import { WindowTimers } from "@/infra/obsidian/timers";
+import { ObsidianVault, isMarkdownFile } from "@/infra/obsidian/vault";
+import { PluginDataStore } from "@/infra/storage/plugin-data";
+import { ObsidianWebSocketManager } from "@/infra/websocket/manager";
+import type { Services } from "@/types";
 import {
   registerInstallProtocolHandler,
   registerOpenProtocolHandler,
-} from "@/protocol";
-import { enumerateVaultTree, isPathInScope } from "@/scope";
-import {
-  ackBatch,
-  emptyState,
-  enqueue,
-  failBatch,
-  nextBatch,
-  type QueueState,
-} from "@/queue";
-import {
-  DEFAULT_SETTINGS,
-  MyBrainSettingTab,
-  type MyBrainSettings,
-} from "@/settings";
-import { materializeEvents, pushNegotiatedManifest } from "@/sync-protocol";
-import {
-  API_VERSION,
-  PROTOCOL_VERSION,
-  type ContentMissing,
-  type ContentNote,
-  type IngestEvent,
-  type IngestResponse,
-  type LatestPluginRelease,
-  type ServerProtocol,
-  type UpsertEvent,
-  type UpsertEventV2,
-} from "@/types";
-import { checkForUpdates } from "@/update";
-import { extractLinks } from "@/util";
-import {
-  manifestV2Body,
-  noteMetadata,
-  readNote,
-  readNotes,
-  readRequestedNote,
-  type NoteRead,
-  type RequestEnvelope,
-} from "@/vault-metadata";
-import { ObsidianWebSocketManager } from "@/websocket";
-
-type ManifestFile = Omit<UpsertEvent, "op" | "wikilinks" | "mdLinks">;
-
-type StoredData = {
-  settings: MyBrainSettings;
-  queue: QueueState;
-};
+} from "@/ui/deep-link";
+import { ObsidianNotifier } from "@/ui/notices";
+import { MyBrainSettingTab } from "@/ui/settings-tab";
+import type { PluginFacade } from "@/ui/types";
+import { ObsidianUpdatePrompt } from "@/ui/update-modal";
+import { ObsidianUploadFailurePrompt } from "@/ui/upload-failure-notice";
 
 const WS_RESTART_DEBOUNCE_MS = 500;
 
-export default class MyBrainPlugin extends Plugin {
-  declare settings: MyBrainSettings;
-  private queue: QueueState = emptyState();
-  private readonly resolvedAttachments = new Map<string, ResolvedAttachment>();
-  private readonly pendingFlushTimers = new Map<string, number>();
-  // Skip enqueueing an upsert whose content hash matches the last one we
-  // already enqueued — Obsidian fires `modify` for autosave even when the
-  // file is byte-identical to disk.
-  private readonly lastEnqueuedHashes = new Map<string, string>();
-  private readonly attachmentHashes = new AttachmentHashCache();
-  // Identifies this plugin install to the backend (header on every request).
-  // Self-generated per machine and kept in device-local storage — never in
-  // `data.json`, which syncs with the vault — so each machine running this
-  // vault reports its own installed version.
-  private deviceId = "";
-  private draining = false;
-  private tokenRejected = false;
-  private unloaded = false;
-  // Number of full-vault syncs (`pushManifest`) in flight. A counter, not a
-  // flag, so overlapping pushes (e.g. a deep-link sync plus a server-requested
-  // one) don't flip the UI back to idle while another is still running.
-  private syncActiveCount = 0;
-  private readonly syncListeners = new Set<() => void>();
-  private readonly wsManager = new ObsidianWebSocketManager();
-  // Notes the server asked for (`content_requested`): the only path by which
-  // note text leaves the vault under protocol 2.
-  private readonly contentQueue = new ContentRequestQueue<ResolvedAttachment>({
-    read: (path) =>
-      readRequestedNote(
-        this.app,
-        path,
-        (p) => this.isInScope(p),
-        this.attachmentHashes,
-      ),
-    send: (notes, missing) => this.postContent(notes, missing),
-    uploadAttachments: async (hashes, resolved) => {
-      this.rememberAttachments(resolved);
-      await this.uploadAttachmentsForBatch(hashes);
-    },
-    onTokenRejected: () => this.markTokenRejected(),
-    setTimer: (fn, ms) => window.setTimeout(fn, ms),
-    clearTimer: (id) => window.clearTimeout(id),
+/** Builds every adapter and use case over one shared settings object; the
+ * plugin class only wires their lifecycle. */
+export function composeServices(
+  app: App,
+  manifest: PluginManifest,
+  store: PluginDataPort,
+  initial: StoredData,
+  restartChannel: () => void,
+): Services {
+  const { settings, queue } = initial;
+  const device = new ObsidianDeviceStore(app);
+  const deviceId = getOrCreateDeviceId(device);
+  const api = new HttpMyBrainApi(() => ({
+    endpoint: settings.endpoint,
+    token: settings.token,
+    deviceId,
+    pluginVersion: manifest.version,
+  }));
+  const vault = new ObsidianVault(app);
+  const notifier = new ObsidianNotifier();
+  const timers = new WindowTimers();
+  const clock = () => Date.now();
+  const auth: AuthState = { rejected: false };
+  const onTokenRejected = () => markTokenRejected({ auth, notifier });
+
+  async function save(): Promise<void> {
+    await store.save({ settings, queue: editSync.queued() });
+  }
+
+  const attachments = new AttachmentUpload({
+    api,
+    settings: () => settings,
+    isMobile: () => Platform.isMobile,
+  });
+  const uploadRetry = new AttachmentRetry({
+    uploader: attachments,
+    vault,
+    device,
+    prompt: new ObsidianUploadFailurePrompt(),
+    notifier,
+    timers,
+    clock,
+    auth,
+    canSync: () => canSync(settings),
+    onTokenRejected,
   });
 
-  private readonly debouncedWsRestart = debounce(
-    () => this.doRestartWebSocket(),
+  const deps: SyncDeps = {
+    vault,
+    api,
+    attachments,
+    failedUploads: uploadRetry,
+    notifier,
+    timers,
+    clock,
+    settings: () => settings,
+    save,
+    pluginVersion: manifest.version,
+    auth,
+  };
+
+  const syncState = new SyncState();
+  const fullSync = new FullSync(deps, syncState);
+  const editSync = new EditSync(deps, fullSync, queue);
+
+  return {
+    fullSync,
+    editSync,
+    contentQueue: createContentQueue(deps),
+    uploadRetry,
+    syncState,
+    updateCheck: new UpdateCheck({
+      api,
+      device,
+      notifier,
+      prompt: new ObsidianUpdatePrompt(app),
+      canSync: () => canSync(settings),
+      installedVersion: manifest.version,
+      clock,
+      onTokenRejected,
+    }),
+    sync: new SyncController({
+      settings: () => settings,
+      auth,
+      save,
+      editSync,
+      fullSync,
+      restartChannel,
+    }),
+    api,
+    channel: new ObsidianWebSocketManager(
+      () => ({ endpoint: settings.endpoint, token: settings.token }),
+      notifier,
+      timers,
+    ),
+    vault,
+    device,
+    notifier,
+    settings,
+    auth,
+    save,
+  };
+}
+
+/** The MyBrain plugin: loads the services, wires vault events, the server
+ * channel and the timers to them, and is the facade the UI talks to. */
+export default class MyBrainPlugin extends Plugin implements PluginFacade {
+  /** A field, not a getter: Obsidian's `Plugin` declares `settings` as a
+   * property. Set once in `onload`; every service holds this same object. */
+  declare settings: MyBrainSettings;
+  private _services?: Services;
+
+  private readonly _debouncedWsRestart = debounce(
+    () => this._doRestartWebSocket(),
     WS_RESTART_DEBOUNCE_MS,
     true,
   );
 
+  /** Obsidian's load hook: build the services, then start syncing once the
+   * layout is ready. */
   async onload() {
-    await this.loadAll();
+    const store = new PluginDataStore(
+      () => this.loadData(),
+      (data) => this.saveData(data),
+    );
 
-    this.deviceId = getOrCreateDeviceId(this.app);
+    const services = composeServices(
+      this.app,
+      this.manifest,
+      store,
+      await store.load(),
+      () => this._restartWebSocket(),
+    );
 
-    this.addSettingTab(new MyBrainSettingTab(this.app, this));
+    this._services = services;
+    this.settings = services.settings;
+
+    this.addSettingTab(new MyBrainSettingTab(this));
     registerInstallProtocolHandler(this);
     registerOpenProtocolHandler(this);
 
-    let dirty = false;
+    const dirty = ensureVaultIdentity(
+      this.settings,
+      () => services.vault.vaultName(),
+      () => crypto.randomUUID(),
+    );
 
-    if (!this.settings.vaultId) {
-      this.settings.vaultId = crypto.randomUUID();
-      dirty = true;
-    }
-
-    if (!this.settings.vaultName) {
-      this.settings.vaultName = this.app.vault.getName();
-      dirty = true;
-    }
-
-    if (dirty) await this.saveSettings();
+    // A failed save must not stop syncing; the next save writes the identity.
+    if (dirty)
+      await quietlyAsync("save the vault identity", this.saveSettings());
 
     this.app.workspace.onLayoutReady(() => {
-      this.registerVaultEvents();
-      this.startWebSocket();
+      const { editSync, sync, uploadRetry } = services;
 
-      if (this.canSync()) {
-        if (this.settings.lastSyncAt) {
-          void this.catchUpSinceLastSync();
-        } else {
-          void this.pushManifest({ initial: true });
-        }
-      }
+      this._registerVaultEvents();
+      this._startWebSocket();
+      sync.startup();
+      uploadRetry.start();
 
       this.registerInterval(
-        window.setInterval(() => void this.drain(), DRAIN_INTERVAL_MS),
+        window.setInterval(() => void editSync.drain(), DRAIN_INTERVAL_MS),
       );
 
-      void this.drain();
+      void editSync.drain();
 
       this.registerInterval(
         window.setInterval(
-          () => void checkForUpdates(this, { manual: false }),
+          () =>
+            void quietlyAsync("check for updates", this.checkForUpdates(false)),
           UPDATE_CHECK_TICK_MS,
         ),
       );
 
-      void checkForUpdates(this, { manual: false });
+      void quietlyAsync("check for updates", this.checkForUpdates(false));
     });
   }
 
+  /** Obsidian's unload hook: stop sending, then save what is queued. */
   onunload() {
-    this.unloaded = true;
-    this.pendingFlushTimers.forEach((id) => window.clearTimeout(id));
-    this.pendingFlushTimers.clear();
-    this.contentQueue.stop();
-    this.wsManager.stop();
-    // Best-effort final persistence so events queued in the last second
-    // aren't lost. `onunload` isn't awaited, but on a single-threaded loop
-    // this still completes before the runtime tears down.
-    void this.saveAll();
-  }
+    // onload may have failed before the services were built.
+    if (!this._services) return;
 
-  /** Public — called by the settings UI on endpoint/token edits. Debounced
-   * so keystroke-by-keystroke editing doesn't open+close the socket per
-   * character. */
-  restartWebSocket(): void {
-    this.debouncedWsRestart();
-  }
+    this._debouncedWsRestart.cancel();
+    this._services.editSync.stop();
+    this._services.contentQueue.stop();
+    this._services.uploadRetry.stop();
+    this._services.channel.stop();
 
-  /** Whether a full-vault sync is currently uploading. */
-  isSyncing(): boolean {
-    return this.syncActiveCount > 0;
-  }
-
-  /** Subscribe to sync start/stop so the settings UI can reflect it live.
-   * Returns an unsubscribe function. */
-  onSyncStateChange(listener: () => void): () => void {
-    this.syncListeners.add(listener);
-    return () => this.syncListeners.delete(listener);
-  }
-
-  /** Public — called by `protocol.ts` when a deep-link installs new
-   * settings. Encapsulates the assign + persist + reconnect so the protocol
-   * handler doesn't poke private state. */
-  async applyDeepLinkSettings(incoming: {
-    token: string;
-    endpoint: string | null;
-    vaultId: string | null;
-    vaultName: string | null;
-  }): Promise<void> {
-    this.settings.token = incoming.token;
-
-    if (incoming.endpoint) this.settings.endpoint = incoming.endpoint;
-
-    if (incoming.vaultId) this.settings.vaultId = incoming.vaultId;
-
-    if (incoming.vaultName) this.settings.vaultName = incoming.vaultName;
-
-    this.tokenRejected = false;
-
-    await this.saveSettings();
-
-    this.restartWebSocket();
-
-    // A deep link (re)configures the connection, so start syncing right away
-    // instead of waiting for a server manifest_request or the next reload.
-    if (this.canSync()) {
-      void this.pushManifest({ initial: true });
-    }
-  }
-
-  /** Latest published plugin release from the MyBrain backend (which caches
-   * it from GitHub server-side). Null when the lookup fails or the release is
-   * unknown. The authenticated request also reports this install's version to
-   * the backend via the standard headers. */
-  async fetchLatestPluginRelease(): Promise<LatestPluginRelease | null> {
-    try {
-      return (
-        (await getJson<LatestPluginRelease | null>(
-          this.auth(),
-          "/latest-release",
-        )) ?? null
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  /** Whether the plugin is configured to talk to a MyBrain endpoint. */
-  canSync(): boolean {
-    return Boolean(this.settings.token && this.settings.endpoint);
-  }
-
-  private doRestartWebSocket(): void {
-    this.wsManager.stop();
-    this.contentQueue.clear();
-    this.startWebSocket();
-  }
-
-  private startWebSocket(): void {
-    if (!this.canSync()) return;
-
-    this.wsManager.start({
-      endpoint: this.settings.endpoint,
-      token: this.settings.token,
-      onManifestRequest: async () => {
-        await this.pushManifest({ initial: false });
-      },
-      onScopeChanged: async (folders) => {
-        this.settings.inScopeFolders = folders;
-        await this.saveSettings();
-        await this.pushManifest({ initial: false });
-      },
-      onTokenRejected: () => {
-        this.tokenRejected = true;
-      },
-      onContentRequested: (requestId, paths) => {
-        this.contentQueue.request(requestId, paths);
-      },
-      // Tells the server this install speaks protocol 2; on (re)connect the
-      // server answers with the content requests still open.
-      onOpen: () => {
-        this.wsManager.send({
-          type: "hello",
-          protocol: PROTOCOL_VERSION,
-          pluginVersion: this.manifest.version,
-        });
-      },
+    // Best-effort save of queued events not yet written to data.json.
+    this.saveSettings().catch((e: unknown) => {
+      console.error("MyBrain: failed to save on unload", e);
     });
   }
 
-  async loadAll(): Promise<void> {
-    const data = ((await this.loadData()) as StoredData | null) ?? null;
-
-    this.settings = { ...DEFAULT_SETTINGS, ...data?.settings };
-
-    this.queue = data?.queue ?? emptyState();
-  }
-
+  /** Write `data.json`: the settings and the edit queue. */
   async saveSettings(): Promise<void> {
-    await this.saveAll();
+    await this._built.save();
   }
 
-  async saveAll(): Promise<void> {
-    const data: StoredData = { settings: this.settings, queue: this.queue };
-    await this.saveData(data);
+  /** Check for a newer release; a manual check always answers. */
+  async checkForUpdates(manual: boolean): Promise<void> {
+    await this._built.updateCheck.run({ manual });
   }
 
+  /** Where the UI shows its notices. */
+  get notifier(): Notifier {
+    return this._built.notifier;
+  }
+
+  /** Whether a full sync is running. */
+  isSyncing(): boolean {
+    return this._built.syncState.isSyncing();
+  }
+
+  /** Called when syncing starts or stops; returns the unsubscribe. */
+  onSyncStateChange(listener: () => void): () => void {
+    return this._built.syncState.onChange(listener);
+  }
+
+  /** Apply settings from a confirmed install link. */
+  async applyDeepLinkSettings(incoming: DeepLinkSettings): Promise<void> {
+    await this._built.sync.applyDeepLink(incoming);
+  }
+
+  /** Store a token the user pasted and reconnect with it. */
+  async saveToken(token: string): Promise<void> {
+    await this._built.sync.saveToken(token);
+  }
+
+  /** Push every note in scope again, from scratch. */
+  async resync(): Promise<boolean> {
+    return await this._built.sync.resync();
+  }
+
+  /** The newest version the last update check saw, if any. */
+  latestKnownVersion(): string | null {
+    return this._built.device.load(UPDATE_LATEST_VERSION_KEY);
+  }
+
+  /** Ping the server and describe the token's state. */
   async testConnection(): Promise<string> {
-    if (!this.canSync()) {
-      return "endpoint or token not set";
-    }
+    const { api, auth } = this._built;
 
-    try {
-      const body = await getJson<{ status?: string }>(this.auth(), "/ping");
-
-      this.tokenRejected = false;
-
-      return body.status === "active"
-        ? "token active"
-        : "token pending — POST to activate";
-    } catch (e) {
-      if (e instanceof TokenRejectedError) return "token rejected";
-      return e instanceof Error ? e.message : String(e);
-    }
+    return await checkConnection({ api, auth, settings: () => this.settings });
   }
 
-  async initialScan(): Promise<boolean> {
-    return await this.pushManifest({ initial: true });
+  /** The failed uploads still waiting, for the settings tab. */
+  pendingUploads(): PendingUpload[] {
+    return this._built.uploadRetry.pending();
   }
 
-  /** Full sync of the notes in scope, negotiating the protocol (see
-   * `pushNegotiatedManifest`). */
-  async pushManifest({
-    initial,
-    fallbackToV1 = true,
-  }: {
-    initial: boolean;
-    fallbackToV1?: boolean;
-  }): Promise<boolean> {
-    if (!this.canSync()) {
-      if (initial) new Notice("MyBrain: set endpoint and token first");
-      return false;
-    }
-
-    this._beginSync();
-
-    try {
-      return await this._runFullSync(initial, fallbackToV1);
-    } finally {
-      this._endSync();
-    }
+  /** Called when the waiting uploads change; returns the unsubscribe. */
+  onPendingUploadsChange(listener: () => void): () => void {
+    return this._built.uploadRetry.onChange(listener);
   }
 
-  private async _runFullSync(
-    initial: boolean,
-    fallbackToV1: boolean,
-  ): Promise<boolean> {
-    const files = this.app.vault
-      .getMarkdownFiles()
-      .filter((f) => this.isInScope(f.path));
-
-    if (initial) new Notice(`MyBrain: syncing ${files.length} notes...`);
-
-    let sentCount = 0;
-
-    try {
-      // Read once: the protocol 1 fallback reuses the reads of the v2 attempt.
-      const reads = await readNotes(this.app, files, this.attachmentHashes);
-
-      const outcome = await pushNegotiatedManifest({
-        sendV2: async () => {
-          sentCount = await this._postManifestV2(reads);
-        },
-        sendV1: async () => {
-          sentCount = await this._postManifestV1(reads);
-        },
-        fallbackToV1,
-        log: (message) => console.warn(message),
-      });
-
-      this.tokenRejected = false;
-      this.settings.serverProtocol = outcome.protocol;
-
-      if (outcome.sent) this.settings.lastSyncAt = Date.now();
-
-      await this.saveAll();
-
-      const unreadable = files.length - reads.length;
-
-      if (initial) {
-        new Notice(
-          unreadable > 0
-            ? `MyBrain: synced ${sentCount} notes; ${unreadable} could not be read (see console)`
-            : `MyBrain: synced ${sentCount} notes`,
-        );
-      }
-
-      return outcome.sent;
-    } catch (e) {
-      if (e instanceof TokenRejectedError) {
-        this.markTokenRejected();
-        return false;
-      }
-      console.warn("MyBrain: manifest push failed", e);
-      if (initial) new Notice("MyBrain: manifest push failed (see console)");
-      return false;
-    }
+  /** Send every waiting upload now. */
+  async retryUploads(): Promise<void> {
+    await this._built.uploadRetry.retryNow();
   }
 
-  /** Protocol 2 manifest: metadata of every note in scope, no text. */
-  private async _postManifestV2(reads: NoteRead[]): Promise<number> {
-    const body = await manifestV2Body(this.app, reads, {
-      ...this.envelope(),
-      pluginVersion: this.manifest.version,
-    });
+  private _registerVaultEvents(): void {
+    const { editSync } = this._built;
 
-    // Attachments go up only with the text of a note that embeds them, when
-    // the server asks for that note.
-    await postJson<unknown>(this.auth(), "/manifest", body);
-
-    return body.files.length;
-  }
-
-  /** Protocol 1 manifest (plugin 1.0.x behaviour): every note with its text. */
-  private async _postManifestV1(reads: NoteRead[]): Promise<number> {
-    const manifest: ManifestFile[] = reads.map((read) => {
-      this.rememberAttachments(read.resolved);
-
-      return {
-        ...this.snapshotV1(read),
-        attachments: read.resolved.map((r) => r.ref),
-      };
-    });
-
-    const response = await postJson<IngestResponse | undefined>(
-      this.auth(),
-      "/manifest",
-      {
-        apiVersion: API_VERSION,
-        ...this.envelope(),
-        files: manifest,
-        folders: enumerateVaultTree(this.app),
-      },
-    );
-
-    const attachmentsNeeded = response?.attachmentsNeeded ?? [];
-
-    if (attachmentsNeeded.length > 0) {
-      await this.uploadAttachmentsForBatch(attachmentsNeeded);
-    }
-
-    return manifest.length;
-  }
-
-  /** The protocol the server speaks, found out with a metadata-only manifest
-   * push when not known yet (first run after updating from 1.0.x). */
-  private async ensureServerProtocol(): Promise<ServerProtocol> {
-    if (this.settings.serverProtocol) return this.settings.serverProtocol;
-
-    await this.pushManifest({ initial: false, fallbackToV1: false });
-
-    if (this.tokenRejected) throw new TokenRejectedError();
-
-    if (!this.settings.serverProtocol) {
-      throw new Error("MyBrain: could not determine the server protocol");
-    }
-
-    return this.settings.serverProtocol;
-  }
-
-  private _beginSync(): void {
-    this.syncActiveCount += 1;
-
-    if (this.syncActiveCount === 1) this._notifySyncStateChange();
-  }
-
-  private _endSync(): void {
-    this.syncActiveCount = Math.max(0, this.syncActiveCount - 1);
-
-    if (this.syncActiveCount === 0) this._notifySyncStateChange();
-  }
-
-  private _notifySyncStateChange(): void {
-    for (const listener of this.syncListeners) {
-      try {
-        listener();
-      } catch (e) {
-        console.warn("MyBrain: sync-state listener failed", e);
-      }
-    }
-  }
-
-  /** Walk the vault on startup for markdown files whose disk mtime is
-   * newer than our last successful sync, and enqueue upserts for them.
-   * Catches edits made while the plugin was off (git pull, mobile sync,
-   * another vault session). */
-  private async catchUpSinceLastSync(): Promise<void> {
-    const since = this.settings.lastSyncAt;
-
-    if (since === null) return;
-
-    const stale = this.app.vault
-      .getMarkdownFiles()
-      .filter((f) => this.isInScope(f.path) && f.stat.mtime > since);
-
-    if (stale.length === 0) return;
-
-    for (const file of stale) {
-      void this.enqueueUpsertEvent(file);
-    }
-  }
-
-  private registerVaultEvents(): void {
     this.registerEvent(
-      this.app.vault.on("create", (file) => this.handleUpsert(file)),
+      this.app.vault.on("create", (file) => {
+        if (isMarkdownFile(file)) editSync.onUpsert(file);
+      }),
     );
     this.registerEvent(
-      this.app.vault.on("modify", (file) => this.handleUpsert(file)),
+      this.app.vault.on("modify", (file) => {
+        if (isMarkdownFile(file)) editSync.onUpsert(file);
+      }),
     );
     this.registerEvent(
-      this.app.vault.on("delete", (file) => this.handleDelete(file)),
+      this.app.vault.on("delete", (file) => {
+        if (isMarkdownFile(file)) editSync.onDelete(file);
+      }),
     );
     this.registerEvent(
-      this.app.vault.on("rename", (file, oldPath) =>
-        this.handleRename(file, oldPath),
-      ),
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (isMarkdownFile(file)) editSync.onRename(file, oldPath);
+      }),
     );
   }
 
-  private handleUpsert(file: TAbstractFile): void {
-    if (!this.isSyncableMarkdown(file)) return;
-    this.scheduleFlush(file.path, () => this.enqueueUpsertEvent(file));
-  }
+  private _startWebSocket(): void {
+    if (!canSync(this.settings)) return;
 
-  private handleDelete(file: TAbstractFile): void {
-    if (!this.isSyncableMarkdown(file)) return;
-    this.scheduleFlush(file.path, async () => {
-      this.queue = enqueue(this.queue, { op: "delete", path: file.path });
-      this.lastEnqueuedHashes.delete(file.path);
-      void this.drain();
-    });
-  }
+    const { channel, fullSync, contentQueue, auth, notifier } = this._built;
 
-  private handleRename(file: TAbstractFile, oldPath: string): void {
-    if (!(file instanceof TFile) || file.extension !== "md") return;
-
-    if (!this.isInScope(file.path) && !this.isInScope(oldPath)) return;
-
-    this.scheduleFlush(file.path, async () => {
-      this.queue = enqueue(this.queue, {
-        op: "rename",
-        oldPath,
-        newPath: file.path,
-      });
-
-      const carried = this.lastEnqueuedHashes.get(oldPath);
-
-      this.lastEnqueuedHashes.delete(oldPath);
-
-      if (carried !== undefined) {
-        this.lastEnqueuedHashes.set(file.path, carried);
-      }
-
-      void this.drain();
-    });
-  }
-
-  private isSyncableMarkdown(file: TAbstractFile | null): file is TFile {
-    return (
-      file instanceof TFile &&
-      file.extension === "md" &&
-      this.isInScope(file.path)
+    channel.start(
+      serverEventHandlers({
+        settings: () => this.settings,
+        save: () => this.saveSettings(),
+        auth,
+        notifier,
+        pluginVersion: this.manifest.version,
+        channel,
+        fullSync,
+        contentQueue,
+      }),
     );
   }
 
-  private async enqueueUpsertEvent(file: TFile): Promise<void> {
-    // Re-check scope at flush time: a scope change can land while this file
-    // sits in the debounce window, and we must not enqueue a note the new
-    // scope excludes.
-    if (!this.isInScope(file.path)) return;
-
-    try {
-      const hash = await sha256(await this.app.vault.cachedRead(file));
-
-      if (this.lastEnqueuedHashes.get(file.path) === hash) return;
-
-      const event = await this.buildUpsertEventV2(file);
-
-      this.queue = enqueue(this.queue, event);
-      this.lastEnqueuedHashes.set(file.path, event.hash);
-
-      void this.drain();
-    } catch (e) {
-      console.error("MyBrain: failed to build upsert event", file.path, e);
-    }
+  /** Debounced so back-to-back restarts (a token save, a deep link) reconnect
+   * once. */
+  private _restartWebSocket(): void {
+    this._debouncedWsRestart();
   }
 
-  private async buildUpsertEventV2(file: TFile): Promise<UpsertEventV2> {
-    const read = await readNote(this.app, file, this.attachmentHashes);
-
-    return { op: "upsert", ...noteMetadata(this.app, read) };
+  private _doRestartWebSocket(): void {
+    this._built.channel.stop();
+    this._built.contentQueue.clear();
+    this._startWebSocket();
   }
 
-  private async buildUpsertEventV1(file: TFile): Promise<UpsertEvent> {
-    const read = await readNote(this.app, file, this.attachmentHashes);
+  /** The services built in `onload`; the facade is only reached after it.
+   * Not `_loaded`: Obsidian's `Component` uses that name. */
+  private get _built(): Services {
+    if (!this._services) throw new Error("MyBrain: plugin not loaded");
 
-    this.rememberAttachments(read.resolved);
-
-    return {
-      op: "upsert",
-      ...this.snapshotV1(read),
-      wikilinks: extractLinks(read.cache?.links),
-      mdLinks: extractLinks(read.cache?.embeds),
-      attachments: read.resolved.map((r) => r.ref),
-    };
-  }
-
-  /** A note as protocol 1 sends it: its text and full frontmatter. */
-  private snapshotV1(read: NoteRead): Omit<ManifestFile, "attachments"> {
-    const { file, cache } = read;
-
-    return {
-      path: file.path,
-      name: file.basename,
-      ext: "md",
-      content: read.content,
-      frontmatter: cache?.frontmatter
-        ? Object.fromEntries(
-            Object.entries(cache.frontmatter).filter(([k]) => k !== "position"),
-          )
-        : null,
-      mtime: file.stat.mtime,
-      size: file.stat.size,
-      hash: read.hash,
-    };
-  }
-
-  /** Attachments a sent payload referenced, kept so the ones the server asks
-   * for can be uploaded. */
-  private rememberAttachments(resolved: readonly ResolvedAttachment[]): void {
-    for (const r of resolved) this.resolvedAttachments.set(r.ref.hash, r);
-  }
-
-  /** A queued note rebuilt as it is now, or null when it's gone or out of
-   * scope (its delete or rename event is already queued). */
-  private async rebuildUpsert<T>(
-    path: string,
-    build: (file: TFile) => Promise<T>,
-  ): Promise<T | null> {
-    const file = this.app.vault.getAbstractFileByPath(path);
-
-    if (!this.isSyncableMarkdown(file)) return null;
-
-    return await build(file);
-  }
-
-  private async postContent(
-    notes: ContentNote[],
-    missing: ContentMissing[],
-  ): Promise<IngestResponse | undefined> {
-    return await postJson<IngestResponse | undefined>(
-      this.auth(),
-      "/content",
-      buildContentBody(this.envelope(), notes, missing),
-    );
-  }
-
-  /** Fields every request body carries. */
-  private envelope(): RequestEnvelope {
-    return {
-      vaultId: this.settings.vaultId,
-      vaultName: this.settings.vaultName || this.app.vault.getName(),
-      clientTime: new Date().toISOString(),
-    };
-  }
-
-  private scheduleFlush(key: string, fn: () => Promise<void>): void {
-    const existing = this.pendingFlushTimers.get(key);
-
-    if (existing) {
-      window.clearTimeout(existing);
-    }
-
-    const timer = window.setTimeout(() => {
-      this.pendingFlushTimers.delete(key);
-      void fn();
-    }, DEBOUNCE_MS);
-
-    this.pendingFlushTimers.set(key, timer);
-  }
-
-  private async drain(): Promise<void> {
-    if (this.draining || this.unloaded) return;
-
-    if (!this.canSync() || this.tokenRejected) return;
-
-    this.draining = true;
-
-    try {
-      while (!this.unloaded) {
-        const now = Date.now();
-        const batch = nextBatch(this.queue, BATCH_SIZE, now);
-
-        if (batch.length === 0) return;
-
-        const ok = await this.flush(batch);
-
-        if (!ok) return;
-      }
-    } finally {
-      this.draining = false;
-    }
-  }
-
-  private async flush(batch: IngestEvent[]): Promise<boolean> {
-    try {
-      // Edits follow the protocol the last manifest push agreed on. A refused
-      // batch is retried as is, never re-sent as protocol 1 with note text:
-      // only a manifest push changes the protocol.
-      const response = await this.postIngest(
-        batch,
-        await this.ensureServerProtocol(),
-      );
-
-      this.queue = ackBatch(this.queue, batch.length);
-
-      // Persist only at the durability boundary: the server has now accepted
-      // these events, so saving here is the meaningful checkpoint. Crashes
-      // before this point are recovered via `catchUpSinceLastSync` on next
-      // start using mtime > lastSyncAt.
-      await this.saveAll();
-
-      const attachmentsNeeded = response?.attachmentsNeeded ?? [];
-
-      if (attachmentsNeeded.length > 0) {
-        await this.uploadAttachmentsForBatch(attachmentsNeeded);
-      }
-
-      return true;
-    } catch (e) {
-      if (e instanceof TokenRejectedError) {
-        this.markTokenRejected();
-        return false;
-      }
-
-      console.warn("MyBrain: flush failed, will retry", e);
-      this.queue = failBatch(this.queue, Date.now());
-
-      await this.saveAll();
-
-      return false;
-    }
-  }
-
-  private async postIngest(
-    batch: IngestEvent[],
-    protocol: ServerProtocol,
-  ): Promise<IngestResponse | undefined> {
-    const events = await materializeEvents(batch, protocol, {
-      v1: (path) => this.rebuildUpsert(path, (f) => this.buildUpsertEventV1(f)),
-      v2: (path) => this.rebuildUpsert(path, (f) => this.buildUpsertEventV2(f)),
-    });
-
-    if (events.length === 0) return undefined;
-
-    return await postJson<IngestResponse>(this.auth(), "/ingest", {
-      ...(protocol === 2 ? { protocol: 2 } : {}),
-      apiVersion: API_VERSION,
-      ...this.envelope(),
-      events,
-    });
-  }
-
-  private async uploadAttachmentsForBatch(hashes: string[]): Promise<void> {
-    try {
-      const result = await uploadAttachments(
-        this.app,
-        this.auth(),
-        this.settings.vaultId,
-        this.resolvedAttachments,
-        hashes,
-        this.settings.syncAttachmentsOnMobile,
-      );
-
-      for (const hash of result.uploaded) {
-        this.resolvedAttachments.delete(hash);
-      }
-
-      if (result.skipped.length > 0) {
-        console.warn(`MyBrain: ${result.skipped.length} attachment(s) skipped`);
-      }
-    } catch (e) {
-      if (e instanceof TokenRejectedError) {
-        this.markTokenRejected();
-        return;
-      }
-      console.warn("MyBrain: attachment upload failed", e);
-    }
-  }
-
-  private markTokenRejected(): void {
-    this.tokenRejected = true;
-    new Notice(TOKEN_REJECTED_NOTICE);
-  }
-
-  private auth(): Auth {
-    return {
-      endpoint: this.settings.endpoint,
-      token: this.settings.token,
-      deviceId: this.deviceId,
-      pluginVersion: this.manifest.version,
-    };
-  }
-
-  private isInScope(path: string): boolean {
-    return isPathInScope(
-      path,
-      this.settings.inScopeFolders,
-      this.app.vault.configDir,
-    );
+    return this._services;
   }
 }

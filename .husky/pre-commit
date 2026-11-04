@@ -1,1 +1,5 @@
-node scripts/check-changelog.mjs --staged
+npm run format:check
+npm run lint
+npm run typecheck
+npm run check:secrets
+npm run check:changelog -- --staged

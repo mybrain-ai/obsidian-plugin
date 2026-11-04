@@ -1,116 +1,34 @@
-export type FolderNode = { path: string; name: string; parent: string | null };
+import type { ContentRequestQueue } from "@/core/content/content-queue";
+import type {
+  DeviceStore,
+  MyBrainApi,
+  Notifier,
+  ServerChannel,
+  VaultPort,
+} from "@/core/ports";
+import type { AttachmentRetry } from "@/core/sync/attachment-retry";
+import type { EditSync } from "@/core/sync/edit-sync";
+import type { FullSync } from "@/core/sync/full-sync";
+import type { SyncController } from "@/core/sync/sync-controller";
+import type { SyncState } from "@/core/sync/sync-state";
+import type { AuthState, MyBrainSettings } from "@/core/sync/types";
+import type { UpdateCheck } from "@/core/update/update-check";
 
-export type AttachmentRef = {
-  path: string;
-  ext: string;
-  size: number;
-  mtime: number;
-  hash: string;
-};
-
-/** Protocol v1 upsert (plugin 1.0.x): carries the note text. Still built when
- * the server has not accepted protocol 2, and may sit in a queue persisted by
- * an older plugin version. */
-export type UpsertEvent = {
-  op: "upsert";
-  path: string;
-  name: string;
-  ext: "md";
-  content: string;
-  frontmatter: Record<string, unknown> | null;
-  mtime: number;
-  size: number;
-  hash: string;
-  wikilinks: string[];
-  mdLinks: string[];
-  attachments: AttachmentRef[];
-};
-
-export type DeleteEvent = { op: "delete"; path: string };
-export type RenameEvent = { op: "rename"; oldPath: string; newPath: string };
-
-/** Protocol 2 metadata for one note: everything the server needs to triage it,
- * without the note text. */
-export type NoteMetadata = {
-  path: string;
-  name: string;
-  ext: "md";
-  size: number;
-  ctime: number;
-  mtime: number;
-  hash: string;
-  words: number;
-  frontmatter: Record<string, unknown> | null;
-  tags: string[];
-  links: string[];
-  unresolved: string[];
-  embeds: string[];
-  attachments: AttachmentRef[];
-};
-
-/** Protocol 2 upsert: the same metadata as the manifest, never the text. */
-export type UpsertEventV2 = { op: "upsert" } & NoteMetadata;
-
-export type IngestEvent = UpsertEvent | UpsertEventV2 | DeleteEvent | RenameEvent;
-
-/** Highest sync protocol this plugin speaks. */
-export const PROTOCOL_VERSION = 2;
-
-/** Protocol the server accepted on the last manifest push: 2 = metadata first,
- * text on request; 1 = a server that predates protocol 2. */
-export type ServerProtocol = 1 | 2;
-
-/** Core Templates and Daily notes settings, all `null` when that plugin is off
- * or `core-plugins.json` can't be read. A Templates plugin with no folder is
- * also `null`; the Daily notes folder is `""` for the vault root, and an empty
- * Daily notes format is Obsidian's default, `YYYY-MM-DD`. */
-export type NativeNoteSettings = {
-  templatesFolder: string | null;
-  dailyNotesFolder: string | null;
-  dailyNotesFormat: string | null;
-};
-
-export type ManifestV2Body = {
-  protocol: 2;
-  apiVersion: number;
-  vaultId: string;
-  vaultName: string;
-  clientTime: string;
-  pluginVersion: string;
-  folders: FolderNode[];
-  files: NoteMetadata[];
-} & NativeNoteSettings;
-
-/** Text of one requested note, sent on `POST /content`. `hash` is computed
- * from the text as read now, so a note edited after the request carries its
- * new hash. */
-export type ContentNote = {
-  requestId: string;
-  path: string;
-  hash: string;
-  content: string;
-  attachments: AttachmentRef[];
-};
-
-/** A requested note the plugin will not send: deleted, renamed away, or no
- * longer inside the sync scope. */
-export type ContentMissing = {
-  requestId: string;
-  path: string;
-  reason: "not_found" | "out_of_scope";
-};
-
-/** Reply to `/ingest`, `/manifest` and `/content`. */
-export type IngestResponse = {
-  accepted: number;
-  rejected: Array<{ path: string; reason: string }>;
-  attachmentsNeeded: string[];
-};
-
-export const API_VERSION = 1;
-
-/** Latest published plugin release, as served by `GET /latest-release`. */
-export type LatestPluginRelease = {
-  version: string;
-  notes: string;
+/** Everything `composeServices` builds for the plugin to run. */
+export type Services = {
+  fullSync: FullSync;
+  editSync: EditSync;
+  contentQueue: ContentRequestQueue;
+  uploadRetry: AttachmentRetry;
+  syncState: SyncState;
+  updateCheck: UpdateCheck;
+  sync: SyncController;
+  api: MyBrainApi;
+  channel: ServerChannel;
+  vault: VaultPort;
+  device: DeviceStore;
+  notifier: Notifier;
+  settings: MyBrainSettings;
+  auth: AuthState;
+  save(): Promise<void>;
 };

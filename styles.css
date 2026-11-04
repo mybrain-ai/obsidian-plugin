@@ -37,3 +37,9 @@
   border-radius: var(--radius-s);
   padding: var(--size-4-2);
 }
+
+.mybrain-notice-actions {
+  display: flex;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-2);
+}
