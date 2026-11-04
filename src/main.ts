@@ -121,7 +121,7 @@ export function composeServices(
   return {
     fullSync,
     editSync,
-    contentQueue: createContentQueue(deps),
+    contentQueue: createContentQueue(deps, (paths) => editSync.resend(paths)),
     uploadRetry,
     syncState,
     updateCheck: new UpdateCheck({

@@ -130,6 +130,8 @@ export class ObsidianVault implements VaultPort {
   }
 
   private async _snapshot(file: TFile): Promise<NoteSnapshot> {
+    // Taken before the text, so metadata sent with it is never newer than the text.
+    const { ctime, mtime, size } = file.stat;
     const content = await this._app.vault.cachedRead(file);
     const targets = resolveEmbedTargets(this._app, file);
     const cache = this._app.metadataCache.getFileCache(file);
@@ -138,9 +140,9 @@ export class ObsidianVault implements VaultPort {
     return {
       path: file.path,
       basename: file.basename,
-      ctime: file.stat.ctime,
-      mtime: file.stat.mtime,
-      size: file.stat.size,
+      ctime,
+      mtime,
+      size,
       content,
       hash: await sha256(content),
       frontmatter: cache?.frontmatter

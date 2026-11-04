@@ -4,6 +4,7 @@ All notable changes to MyBrain are documented here.
 
 ## 1.2.0
 
+- When a note is saved again while its previous change is still being sent, the new change is no longer lost on the way to MyBrain. If MyBrain still ends up with an older version of a note, the plugin sends it the current one, so the note never stays out of date until its next edit.
 - Attachments that fail to upload are retried automatically, also after Obsidian restarts. If they keep failing or MyBrain refuses one, a notice and a row in the plugin settings let you retry them.
 - **Test connection** shows "unexpected server reply" when the server answers with an empty body, instead of a JavaScript error message.
 - A damaged edit queue in the plugin's saved data no longer stops the plugin from loading. The queue starts empty; notes edited since the last sync are sent again at startup, but deletes and renames that were waiting in it are lost.

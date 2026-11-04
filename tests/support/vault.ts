@@ -182,8 +182,10 @@ export function createVault(spec: VaultSpec): TestVault {
 
       const f = files.get(path);
 
-      if (f)
-        f.stat = { ...f.stat, mtime, size: encoder.encode(content).byteLength };
+      if (f) {
+        f.stat.mtime = mtime;
+        f.stat.size = encoder.encode(content).byteLength;
+      }
     },
     remove: (path) => {
       const f = files.get(path);

@@ -54,10 +54,16 @@ export function nextBatch(
   return state.events.slice(0, size);
 }
 
-/** Drop the events the server accepted and clear the backoff. */
-export function ackBatch(state: QueueState, count: number): QueueState {
+/** Drop the events the server accepted and clear the backoff. By identity: an
+ * event queued while the batch was out replaced one of them and stays. */
+export function ackBatch(
+  state: QueueState,
+  sent: readonly IngestEvent[],
+): QueueState {
+  const accepted = new Set(sent);
+
   return {
-    events: state.events.slice(count),
+    events: state.events.filter((event) => !accepted.has(event)),
     attemptCount: 0,
     nextAttemptAt: 0,
   };

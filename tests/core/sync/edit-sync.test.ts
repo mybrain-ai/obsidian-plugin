@@ -54,6 +54,79 @@ test("an autosave of an unchanged note does not read the note again", async () =
   assert.deepEqual(h.vault.reads, [NOTE]);
 });
 
+test("a note the server called stale goes again as an edit, though its hash was sent", async () => {
+  const h = _setup([{ path: NOTE, content: "Hello there.\n" }]);
+
+  await _edited(h);
+  h.edits.resend([NOTE]);
+  await settle();
+
+  const upsert = _expectedIngest(h, [upsertV2(h.vault.notes.get(NOTE)!)], 2);
+
+  assert.deepEqual(h.api.paths(), ["/ingest", "/ingest"]);
+  assert.deepEqual(h.api.calls[1].body, upsert);
+});
+
+test("a stale note outside the chosen folders is not sent again", async () => {
+  const h = _setup([{ path: "Out/b.md", content: "Elsewhere.\n" }], {
+    inScopeFolders: ["In"],
+  });
+
+  h.edits.resend(["Out/b.md"]);
+  await settle();
+
+  assert.deepEqual(h.api.paths(), []);
+});
+
+test("a stale path that is no note of the vault (gone, renamed, not a note) sends nothing and logs nothing", async (t) => {
+  const h = _setup([{ path: NOTE, content: "Hello there.\n" }]);
+  const errors = t.mock.method(console, "error", () => {});
+
+  h.edits.resend(["In/gone.md", "In/pic.png"]);
+  await settle();
+
+  assert.deepEqual(h.api.paths(), []);
+  assert.equal(errors.mock.callCount(), 0);
+});
+
+test("a stale note that can't be read is tried once more after the debounce", async (t) => {
+  const h = _setup([{ path: NOTE, content: "Hello there.\n" }]);
+
+  t.mock.method(console, "error", () => {});
+  h.vault.unreadable.add(NOTE);
+  h.edits.resend([NOTE]);
+  await settle();
+
+  assert.deepEqual(h.api.paths(), []);
+
+  h.vault.unreadable.delete(NOTE);
+  h.timers.fireAll();
+  await settle();
+
+  assert.deepEqual(h.api.paths(), ["/ingest"]);
+});
+
+test("a note saved again while its previous edit is being sent goes out next", async () => {
+  const h = _setup([{ path: NOTE, content: "First.\n" }]);
+  const reply = deferred<undefined>();
+  const answer = h.api.respond;
+
+  h.api.respond = (call) =>
+    h.api.calls.length === 1 ? reply.promise : answer(call);
+
+  await _edited(h);
+  h.vault.put({ path: NOTE, content: "Second.\n", mtime: 2 });
+  await _edited(h);
+  reply.resolve(undefined);
+  await settle();
+
+  const second = upsertV2(h.vault.notes.get(NOTE)!);
+
+  assert.deepEqual(h.api.paths(), ["/ingest", "/ingest"]);
+  assert.deepEqual(h.api.calls[1].body, _expectedIngest(h, [second], 2));
+  assert.deepEqual(h.edits.queued().events, []);
+});
+
 test("edits are debounced per path", async () => {
   const h = _setup([{ path: NOTE, content: "Hello there.\n" }]);
 

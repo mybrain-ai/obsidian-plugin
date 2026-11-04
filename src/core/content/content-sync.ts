@@ -11,7 +11,10 @@ import {
 
 /** Notes the server asked for (`content_requested`): the only path by which
  * note text leaves the vault under protocol 2. */
-export function createContentQueue(deps: SyncDeps): ContentRequestQueue {
+export function createContentQueue(
+  deps: SyncDeps,
+  onStale: (paths: string[]) => void,
+): ContentRequestQueue {
   return new ContentRequestQueue({
     read: (path) =>
       readRequestedNote(deps.vault, path, (p) => isInScope(deps, p)),
@@ -23,6 +26,7 @@ export function createContentQueue(deps: SyncDeps): ContentRequestQueue {
       await uploadAttachments(deps, hashes);
     },
     onTokenRejected: () => markTokenRejected(deps),
+    onStale,
     timers: deps.timers,
   });
 }

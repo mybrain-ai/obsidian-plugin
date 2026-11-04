@@ -131,6 +131,7 @@ function _harness(read: (path: string) => Promise<ContentReadResult>) {
       uploads.push(hashes);
     },
     onTokenRejected: () => {},
+    onStale: () => {},
     timers: new FakeTimers(),
   });
 

@@ -43,7 +43,19 @@ export class EditSync {
   onUpsert(note: NoteRef): void {
     if (!isInScope(this._deps, note.path)) return;
 
-    this._scheduleFlush(note.path, () => this._enqueueUpsert(note));
+    this._scheduleFlush(note.path, () => {
+      void this._enqueueUpsert(note);
+    });
+  }
+
+  /** Queue each note's current version now, even a hash already sent: the server
+   * holds another one. A path that is no note of the vault is skipped. */
+  resend(paths: readonly string[]): void {
+    for (const asked of paths) {
+      const path = this._deps.vault.notePath(asked);
+
+      if (path !== null) void this._resendOne(path);
+    }
   }
 
   /** Queue a delete for a removed note, after the debounce. */
@@ -150,14 +162,31 @@ export class EditSync {
     this._pendingFlushTimers.set(key, timer);
   }
 
-  private async _enqueueUpsert(note: NoteRef): Promise<void> {
-    // A scope change can land during the debounce window.
-    if (!isInScope(this._deps, note.path)) return;
+  /** A read that fails is tried once more after the debounce. */
+  private async _resendOne(path: string): Promise<void> {
+    const queued = await this._enqueueUpsert({ path }, { force: true });
 
+    if (!queued) {
+      this._scheduleFlush(path, () => {
+        void this._enqueueUpsert({ path }, { force: true });
+      });
+    }
+  }
+
+  /** False when the note could not be read; skipped notes count as done. */
+  private async _enqueueUpsert(
+    note: NoteRef,
+    { force = false }: { force?: boolean } = {},
+  ): Promise<boolean> {
     try {
-      const hash = await this._deps.vault.contentHash(note.path);
+      // A scope change can land during the debounce window.
+      if (!isInScope(this._deps, note.path)) return true;
 
-      if (this._lastEnqueuedHashes.get(note.path) === hash) return;
+      if (!force) {
+        const hash = await this._deps.vault.contentHash(note.path);
+
+        if (this._lastEnqueuedHashes.get(note.path) === hash) return true;
+      }
 
       const event = upsertV2(await this._deps.vault.read(note.path));
 
@@ -165,8 +194,12 @@ export class EditSync {
       this._lastEnqueuedHashes.set(note.path, event.hash);
 
       void this.drain();
+
+      return true;
     } catch (e) {
       console.error("MyBrain: failed to build upsert event", note.path, e);
+
+      return false;
     }
   }
 
@@ -196,7 +229,7 @@ export class EditSync {
       return false;
     }
 
-    this._queue = ackBatch(this._queue, batch.length);
+    this._queue = ackBatch(this._queue, batch);
 
     // Saved only once accepted; after a crash before this, `catchUp` queues
     // the changed notes again, but deletes and renames are lost.

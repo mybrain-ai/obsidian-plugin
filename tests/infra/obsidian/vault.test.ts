@@ -198,6 +198,27 @@ test("binaryFile finds a file that is not a note by path, and nothing else", asy
   assert.equal(obsidian.binaryFile("F/missing.pdf"), null);
 });
 
+test("a save landing while a note is read never pairs the old text with the new time", async () => {
+  const vault = createVault({
+    notes: [{ path: "a.md", content: "old", ctime: 1, mtime: 1 }],
+  });
+  const cachedRead = vault.app.vault.cachedRead.bind(vault.app.vault);
+
+  vault.app.vault.cachedRead = async (file) => {
+    const text = await cachedRead(file);
+
+    vault.edit("a.md", "saved during the read", 2);
+
+    return text;
+  };
+
+  const snapshot = await new ObsidianVault(vault.app).read("a.md");
+
+  assert.equal(snapshot.content, "old");
+  assert.equal(snapshot.mtime, 1);
+  assert.equal(snapshot.size, new TextEncoder().encode("old").byteLength);
+});
+
 test("readMany leaves out a note whose read throws", async () => {
   const vault = createVault({
     notes: [
