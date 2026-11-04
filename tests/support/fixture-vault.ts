@@ -7,6 +7,8 @@ export const DIARY = "02 Áreas/Pesquisa/Diary study - roteiro.md";
 export const DAILY = "Diário/2026-10-28.md";
 export const TEMPLATE = "Templates/Reunião.md";
 export const PDF = "Anexos/relatorio-atlas-2025.pdf";
+export const PRIVATE = "Projetos/Salário.md";
+export const KANBAN = "Projetos/Quadro.md";
 
 export const MOC_CONTENT = [
   "---",
@@ -36,6 +38,26 @@ export const DIARY_CONTENT = [
 export const DAILY_CONTENT = "Dia curto. Nada a registrar.\n";
 
 export const TEMPLATE_CONTENT = "## Pauta\n\n- {{date}}\n";
+
+export const PRIVATE_CONTENT = [
+  "---",
+  "private: true",
+  "---",
+  "Salário, contas fixas e a reserva do mês. O aluguel vence no dia cinco,",
+  "a escola no dia dez e o cartão no dia quinze. O que sobra vai para a",
+  "reserva de emergência, até completar seis meses de despesas.",
+  "",
+].join("\n");
+
+export const KANBAN_CONTENT = [
+  "---",
+  "kanban-plugin: basic",
+  "---",
+  "## A fazer",
+  "",
+  "- [ ] Revisar o roteiro",
+  "",
+].join("\n");
 
 export const PDF_BYTES = new TextEncoder().encode("%PDF-1.7 fixture");
 
@@ -85,6 +107,20 @@ export function createFixtureVault(): TestVault {
         content: TEMPLATE_CONTENT,
         ctime: 1760000000000,
         mtime: 1760000000000,
+      },
+      {
+        path: PRIVATE,
+        content: PRIVATE_CONTENT,
+        ctime: 1761200000000,
+        mtime: 1761200000000,
+        frontmatter: { private: true },
+      },
+      {
+        path: KANBAN,
+        content: KANBAN_CONTENT,
+        ctime: 1761300000000,
+        mtime: 1761300000000,
+        frontmatter: { "kanban-plugin": "basic" },
       },
     ],
     binaries: [

@@ -12,8 +12,10 @@ import { syncHarness } from "@test/support/fakes";
 import {
   DAILY,
   DIARY,
+  KANBAN,
   MOC,
   PDF,
+  PRIVATE,
   VAULT_ENVELOPE,
   createFixtureVault,
 } from "@test/support/fixture-vault";
@@ -73,6 +75,15 @@ test("only allowed frontmatter keys leave the vault", async () => {
   });
   assert.equal(JSON.stringify(body).includes("diagnostico"), false);
   assert.equal(JSON.stringify(body).includes("confidencial"), false);
+});
+
+test("the properties the server's triage reads (private, kanban-plugin) leave the vault", async () => {
+  const body = await _fixtureManifest();
+  const privateNote = body.files.find((f) => f.path === PRIVATE);
+  const board = body.files.find((f) => f.path === KANBAN);
+
+  assert.deepEqual(privateNote?.frontmatter, { private: true });
+  assert.deepEqual(board?.frontmatter, { "kanban-plugin": "basic" });
 });
 
 test("words exclude the frontmatter; notes without allowed keys send null", async () => {

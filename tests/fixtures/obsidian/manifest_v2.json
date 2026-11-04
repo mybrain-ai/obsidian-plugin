@@ -30,6 +30,11 @@
       "parent": null
     },
     {
+      "path": "Projetos",
+      "name": "Projetos",
+      "parent": null
+    },
+    {
       "path": "Anexos",
       "name": "Anexos",
       "parent": null
@@ -124,6 +129,42 @@
       "hash": "675d57e4596f78e5ab5285f048acecbb8ffa2e6f9e3ac69a0976d4723e0c6acd",
       "words": 2,
       "frontmatter": null,
+      "tags": [],
+      "links": [],
+      "unresolved": [],
+      "embeds": [],
+      "attachments": []
+    },
+    {
+      "path": "Projetos/Salário.md",
+      "name": "Salário",
+      "ext": "md",
+      "size": 229,
+      "ctime": 1761200000000,
+      "mtime": 1761200000000,
+      "hash": "766c57a4d39243a394c2f54ce7397363bcb0168c9364f24a93088e0b6c208fb3",
+      "words": 40,
+      "frontmatter": {
+        "private": true
+      },
+      "tags": [],
+      "links": [],
+      "unresolved": [],
+      "embeds": [],
+      "attachments": []
+    },
+    {
+      "path": "Projetos/Quadro.md",
+      "name": "Quadro",
+      "ext": "md",
+      "size": 65,
+      "ctime": 1761300000000,
+      "mtime": 1761300000000,
+      "hash": "7e048343049350dcc42cfbf853e800fff794b2c5b77396afc10a3c5d09e61e70",
+      "words": 5,
+      "frontmatter": {
+        "kanban-plugin": "basic"
+      },
       "tags": [],
       "links": [],
       "unresolved": [],

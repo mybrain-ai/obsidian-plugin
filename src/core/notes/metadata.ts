@@ -5,8 +5,8 @@ import type {
   NoteSnapshot,
 } from "@/core/sync/types";
 
-/** Frontmatter keys that may leave the machine. Any other property stays in
- * the vault: a property can be personal data too (e.g. `diagnosis:`). */
+/** Frontmatter keys that may leave the machine; any other stays in the vault,
+ * as it can be personal data. `private` and `kanban-plugin` feed MyBrain's triage. */
 const ALLOWED_FRONTMATTER_KEYS: readonly string[] = [
   "tags",
   "aliases",
@@ -15,6 +15,8 @@ const ALLOWED_FRONTMATTER_KEYS: readonly string[] = [
   "date",
   "source",
   "url",
+  "private",
+  "kanban-plugin",
 ];
 
 /** Protocol 2 metadata of a note. The text was read to hash it and count its
